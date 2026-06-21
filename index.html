@@ -1,0 +1,1598 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>QualifManager — Gestion des qualifications</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<style>
+:root {
+  --navy: #0a1628;
+  --navy2: #0f2040;
+  --navy3: #162d52;
+  --blue: #1e6bff;
+  --blue2: #3d82ff;
+  --cyan: #00c8e0;
+  --red: #ff3b30;
+  --red2: #ff6b6b;
+  --amber: #ff9500;
+  --amber2: #ffb340;
+  --green: #34c759;
+  --green2: #30d158;
+  --surface: #111d30;
+  --surface2: #162540;
+  --surface3: #1c2e4a;
+  --border: rgba(255,255,255,0.07);
+  --border2: rgba(255,255,255,0.12);
+  --text: #e8edf5;
+  --text2: #8a9ab5;
+  --text3: #4a5a75;
+  --font: 'DM Sans', sans-serif;
+  --mono: 'DM Mono', monospace;
+  --radius: 14px;
+  --radius2: 10px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--font);background:var(--navy);color:var(--text);min-height:100vh;overflow-x:hidden}
+body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellipse 80% 60% at 50% -20%,rgba(30,107,255,0.15),transparent);pointer-events:none;z-index:0}
+
+/* LAYOUT */
+.app{display:flex;min-height:100vh;position:relative;z-index:1}
+.sidebar{width:240px;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;position:fixed;top:0;left:0;bottom:0;z-index:100;transition:transform 0.3s}
+.main{flex:1;margin-left:240px;min-height:100vh;display:flex;flex-direction:column}
+.topbar{height:64px;background:rgba(17,29,48,0.95);backdrop-filter:blur(12px);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 24px;gap:16px;position:sticky;top:0;z-index:50}
+.content{padding:28px 28px 60px;flex:1}
+
+/* SIDEBAR */
+.logo{padding:24px 20px 20px;border-bottom:1px solid var(--border)}
+.logo-title{font-size:18px;font-weight:700;color:var(--text);letter-spacing:-0.3px}
+.logo-sub{font-size:11px;color:var(--text3);margin-top:2px;font-family:var(--mono)}
+.nav{padding:12px 10px;flex:1;overflow-y:auto}
+.nav-section{font-size:10px;font-weight:600;color:var(--text3);letter-spacing:1.2px;text-transform:uppercase;padding:12px 10px 6px}
+.nav-item{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:var(--radius2);cursor:pointer;transition:all 0.15s;font-size:13.5px;color:var(--text2);margin-bottom:2px;position:relative}
+.nav-item:hover{background:var(--surface2);color:var(--text)}
+.nav-item.active{background:rgba(30,107,255,0.15);color:var(--blue2)}
+.nav-item.active::before{content:'';position:absolute;left:0;top:50%;transform:translateY(-50%);height:60%;width:3px;background:var(--blue);border-radius:0 3px 3px 0}
+.nav-icon{width:18px;text-align:center;font-size:15px}
+.nav-badge{margin-left:auto;background:var(--red);color:#fff;font-size:10px;font-weight:700;padding:2px 6px;border-radius:10px;min-width:18px;text-align:center}
+.nav-badge.amber{background:var(--amber)}
+.sidebar-bottom{padding:16px;border-top:1px solid var(--border)}
+.user-card{display:flex;align-items:center;gap:10px;padding:10px;border-radius:var(--radius2);background:var(--surface2)}
+.user-avatar{width:34px;height:34px;border-radius:50%;background:linear-gradient(135deg,var(--blue),var(--cyan));display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;color:#fff;flex-shrink:0}
+.user-name{font-size:13px;font-weight:500;color:var(--text)}
+.user-role{font-size:11px;color:var(--text3)}
+
+/* TOPBAR */
+.topbar-title{font-size:17px;font-weight:600;color:var(--text);flex:1}
+.topbar-search{display:flex;align-items:center;gap:8px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:7px 14px;flex:1;max-width:360px}
+.topbar-search input{background:none;border:none;outline:none;color:var(--text);font-size:13.5px;font-family:var(--font);flex:1}
+.topbar-search input::placeholder{color:var(--text3)}
+.btn{display:inline-flex;align-items:center;gap:7px;padding:9px 16px;border-radius:var(--radius2);font-size:13.5px;font-weight:500;font-family:var(--font);cursor:pointer;transition:all 0.15s;border:none;text-decoration:none}
+.btn-primary{background:var(--blue);color:#fff}
+.btn-primary:hover{background:var(--blue2);transform:translateY(-1px);box-shadow:0 4px 16px rgba(30,107,255,0.35)}
+.btn-ghost{background:var(--surface2);color:var(--text2);border:1px solid var(--border)}
+.btn-ghost:hover{background:var(--surface3);color:var(--text)}
+.btn-danger{background:rgba(255,59,48,0.15);color:var(--red2);border:1px solid rgba(255,59,48,0.2)}
+.btn-danger:hover{background:rgba(255,59,48,0.25)}
+.btn-sm{padding:6px 12px;font-size:12px}
+.icon-btn{width:36px;height:36px;display:flex;align-items:center;justify-content:center;border-radius:var(--radius2);background:var(--surface2);border:1px solid var(--border);cursor:pointer;color:var(--text2);font-size:16px;transition:all 0.15s}
+.icon-btn:hover{background:var(--surface3);color:var(--text)}
+
+/* CARDS */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px;transition:border-color 0.2s}
+.card:hover{border-color:var(--border2)}
+.card-sm{padding:14px 16px}
+
+/* STATS ROW */
+.stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:28px}
+.stat-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:18px 20px;position:relative;overflow:hidden;transition:all 0.2s}
+.stat-card::after{content:'';position:absolute;top:0;right:0;width:80px;height:80px;border-radius:0 var(--radius) 0 80px;opacity:0.08}
+.stat-card.red::after{background:var(--red)}
+.stat-card.amber::after{background:var(--amber)}
+.stat-card.green::after{background:var(--green)}
+.stat-card.blue::after{background:var(--blue)}
+.stat-num{font-size:36px;font-weight:700;line-height:1;margin-bottom:4px}
+.stat-num.red{color:var(--red)}
+.stat-num.amber{color:var(--amber)}
+.stat-num.green{color:var(--green)}
+.stat-num.blue{color:var(--blue2)}
+.stat-label{font-size:12px;color:var(--text2);font-weight:500}
+.stat-icon{position:absolute;top:18px;right:20px;font-size:22px;opacity:0.4}
+
+/* TABLE */
+.table-wrap{overflow-x:auto;border-radius:var(--radius);border:1px solid var(--border)}
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+thead tr{background:var(--surface2);border-bottom:1px solid var(--border)}
+th{padding:11px 14px;text-align:left;font-size:11px;font-weight:600;color:var(--text3);letter-spacing:0.8px;text-transform:uppercase;white-space:nowrap}
+td{padding:12px 14px;border-bottom:1px solid var(--border);vertical-align:middle}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:rgba(255,255,255,0.02)}
+.td-name{font-weight:500;color:var(--text)}
+.td-sub{font-size:11px;color:var(--text3);margin-top:2px}
+
+/* BADGES */
+.badge{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:20px;font-size:11.5px;font-weight:600;white-space:nowrap}
+.badge-red{background:rgba(255,59,48,0.15);color:var(--red2);border:1px solid rgba(255,59,48,0.2)}
+.badge-amber{background:rgba(255,149,0,0.15);color:var(--amber2);border:1px solid rgba(255,149,0,0.2)}
+.badge-green{background:rgba(52,199,89,0.15);color:var(--green2);border:1px solid rgba(52,199,89,0.2)}
+.badge-blue{background:rgba(30,107,255,0.15);color:var(--blue2);border:1px solid rgba(30,107,255,0.2)}
+.badge-gray{background:rgba(138,154,181,0.1);color:var(--text2);border:1px solid var(--border)}
+.dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+.dot-red{background:var(--red)}
+.dot-amber{background:var(--amber)}
+.dot-green{background:var(--green)}
+
+/* CATEGORY CHIP */
+.cat-chip{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:6px;font-size:11px;font-weight:500;background:var(--surface3);color:var(--text2)}
+
+/* MODAL */
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);backdrop-filter:blur(4px);z-index:1000;align-items:center;justify-content:center;padding:20px}
+.modal-overlay.open{display:flex}
+.modal{background:var(--surface);border:1px solid var(--border2);border-radius:20px;width:100%;max-width:580px;max-height:90vh;overflow-y:auto;animation:modalIn 0.25s ease}
+@keyframes modalIn{from{opacity:0;transform:scale(0.95) translateY(10px)}to{opacity:1;transform:none}}
+.modal-header{display:flex;justify-content:space-between;align-items:center;padding:22px 24px 16px;border-bottom:1px solid var(--border)}
+.modal-title{font-size:17px;font-weight:600}
+.modal-body{padding:24px}
+.modal-footer{padding:16px 24px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:10px}
+
+/* FORM */
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.form-grid.full{grid-template-columns:1fr}
+.field{display:flex;flex-direction:column;gap:5px}
+.field label{font-size:12px;font-weight:500;color:var(--text2)}
+.field input,.field select,.field textarea{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius2);padding:10px 13px;font-size:13.5px;color:var(--text);font-family:var(--font);outline:none;transition:border-color 0.15s}
+.field input:focus,.field select:focus,.field textarea:focus{border-color:var(--blue)}
+.field select option{background:var(--surface2)}
+.field textarea{resize:vertical;min-height:70px}
+.field-full{grid-column:1/-1}
+
+/* TABS */
+.tabs{display:flex;gap:4px;margin-bottom:22px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius2);padding:4px;width:fit-content}
+.tab-btn{padding:7px 16px;border-radius:8px;font-size:13px;font-weight:500;cursor:pointer;color:var(--text2);transition:all 0.15s;white-space:nowrap;border:none;background:none;font-family:var(--font)}
+.tab-btn.active{background:var(--blue);color:#fff}
+.tab-btn:not(.active):hover{background:var(--surface2);color:var(--text)}
+
+/* PROGRESS BAR */
+.progress-bar{height:5px;background:var(--surface3);border-radius:3px;overflow:hidden;margin-top:6px}
+.progress-fill{height:100%;border-radius:3px;transition:width 0.4s}
+
+/* SCAN ZONE */
+.scan-zone{border:2px dashed var(--border2);border-radius:var(--radius);padding:28px;text-align:center;cursor:pointer;transition:all 0.2s;margin-bottom:16px}
+.scan-zone:hover{border-color:var(--blue);background:rgba(30,107,255,0.05)}
+.scan-zone-icon{font-size:36px;margin-bottom:10px;display:block}
+.scan-zone p{font-size:13px;color:var(--text2)}
+.scan-zone .scan-hint{font-size:11px;color:var(--text3);margin-top:6px}
+.ai-badge{display:inline-flex;align-items:center;gap:6px;background:rgba(0,200,224,0.1);border:1px solid rgba(0,200,224,0.25);color:var(--cyan);padding:5px 12px;border-radius:20px;font-size:12px;font-weight:500;margin-top:10px}
+
+/* ALERT BAR */
+.alert-bar{background:rgba(255,59,48,0.1);border:1px solid rgba(255,59,48,0.2);border-radius:var(--radius2);padding:12px 16px;display:flex;align-items:center;gap:12px;margin-bottom:20px}
+.alert-bar.amber{background:rgba(255,149,0,0.1);border-color:rgba(255,149,0,0.2)}
+.alert-bar-icon{font-size:18px}
+.alert-bar-text{font-size:13px;color:var(--text);flex:1}
+.alert-bar-count{font-weight:700;color:var(--red)}
+.alert-bar.amber .alert-bar-count{color:var(--amber2)}
+
+/* PERSON CARD */
+.person-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px}
+.person-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:18px;cursor:pointer;transition:all 0.2s}
+.person-card:hover{border-color:var(--blue);transform:translateY(-2px);box-shadow:0 8px 24px rgba(0,0,0,0.2)}
+.person-avatar{width:46px;height:46px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:17px;color:#fff;margin-bottom:12px}
+.person-name{font-size:15px;font-weight:600;margin-bottom:3px}
+.person-role{font-size:12px;color:var(--text3);margin-bottom:12px}
+.person-qualifs{display:flex;flex-direction:column;gap:5px}
+.qualif-mini{display:flex;justify-content:space-between;align-items:center;font-size:12px;padding:5px 8px;background:var(--surface2);border-radius:6px}
+.qualif-mini-name{color:var(--text2)}
+.more-badge{font-size:11px;color:var(--text3);padding:3px 8px;background:var(--surface2);border-radius:6px;margin-top:4px;text-align:center}
+
+/* NOTIFICATION PANEL */
+.notif-list{display:flex;flex-direction:column;gap:8px}
+.notif-item{display:flex;gap:12px;padding:12px 14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius2);align-items:flex-start}
+.notif-item.unread{border-color:rgba(30,107,255,0.25);background:rgba(30,107,255,0.05)}
+.notif-dot{width:8px;height:8px;border-radius:50%;background:var(--blue);margin-top:4px;flex-shrink:0}
+.notif-dot.read{background:var(--text3)}
+.notif-body{flex:1}
+.notif-title{font-size:13.5px;font-weight:500;margin-bottom:2px}
+.notif-sub{font-size:12px;color:var(--text2)}
+.notif-time{font-size:11px;color:var(--text3);margin-top:3px}
+.notif-icon{font-size:20px;flex-shrink:0}
+
+/* MOBILE TOGGLE */
+.menu-toggle{display:none;background:none;border:none;color:var(--text);font-size:22px;cursor:pointer;padding:4px}
+.mobile-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:99}
+
+/* PAGE HEADERS */
+.page-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:24px;gap:16px}
+.page-title{font-size:24px;font-weight:700;letter-spacing:-0.5px}
+.page-sub{font-size:13px;color:var(--text3);margin-top:4px}
+.header-actions{display:flex;gap:8px;flex-wrap:wrap;flex-shrink:0}
+
+/* SECTION TITLE */
+.section-title{font-size:14px;font-weight:600;color:var(--text2);margin-bottom:12px;display:flex;align-items:center;gap:8px}
+
+/* FILTER ROW */
+.filter-row{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;align-items:center}
+.filter-select{background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius2);padding:7px 12px;font-size:13px;color:var(--text);font-family:var(--font);outline:none;cursor:pointer}
+.filter-select option{background:var(--surface2)}
+
+/* EMPTY STATE */
+.empty{text-align:center;padding:60px 20px;color:var(--text3)}
+.empty-icon{font-size:48px;margin-bottom:12px;opacity:0.4}
+.empty-text{font-size:15px;margin-bottom:6px;color:var(--text2)}
+.empty-sub{font-size:13px}
+
+/* DOCUMENT ITEM */
+.doc-item{display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:var(--radius2);background:var(--surface2);margin-bottom:6px;cursor:pointer;transition:background 0.15s}
+.doc-item:hover{background:var(--surface3)}
+.doc-icon{font-size:22px}
+.doc-name{font-size:13px;font-weight:500;color:var(--text);flex:1}
+.doc-size{font-size:11px;color:var(--text3)}
+
+/* SPINNER */
+.spinner{display:inline-block;width:16px;height:16px;border:2px solid rgba(255,255,255,0.3);border-top-color:white;border-radius:50%;animation:spin 0.6s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* RESPONSIVE */
+@media(max-width:900px){
+  .sidebar{transform:translateX(-100%)}
+  .sidebar.open{transform:translateX(0)}
+  .main{margin-left:0}
+  .menu-toggle{display:block}
+  .mobile-overlay.open{display:block}
+  .stats-grid{grid-template-columns:1fr 1fr}
+  .form-grid{grid-template-columns:1fr}
+  .content{padding:16px 16px 60px}
+  .topbar{padding:0 16px}
+}
+@media(max-width:560px){
+  .stats-grid{grid-template-columns:1fr 1fr}
+  .person-grid{grid-template-columns:1fr}
+  .page-header{flex-direction:column}
+  .header-actions{width:100%}
+}
+
+/* TOOLTIP */
+[data-tip]{position:relative}
+[data-tip]:hover::after{content:attr(data-tip);position:absolute;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%);background:var(--navy2);color:var(--text);font-size:11px;padding:4px 8px;border-radius:6px;white-space:nowrap;pointer-events:none;border:1px solid var(--border2);z-index:999}
+</style>
+</head>
+<body>
+
+<!-- ÉCRAN DE CONNEXION -->
+<div id="auth-screen" style="position:fixed;inset:0;background:var(--navy);display:flex;align-items:center;justify-content:center;z-index:1000;padding:20px">
+  <div style="width:100%;max-width:380px">
+    <div style="text-align:center;margin-bottom:28px">
+      <div style="font-size:36px;margin-bottom:8px">🛡️</div>
+      <div style="font-size:22px;font-weight:700;color:var(--text)">QualifManager</div>
+      <div style="font-size:13px;color:var(--text2);margin-top:4px">Gestion des qualifications & matériel</div>
+    </div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:24px">
+      <div id="auth-error" style="display:none;background:rgba(255,59,48,0.12);color:var(--red2);border:1px solid rgba(255,59,48,0.3);border-radius:8px;padding:10px 12px;font-size:13px;margin-bottom:14px"></div>
+      <div style="margin-bottom:12px">
+        <label style="font-size:12px;color:var(--text2);display:block;margin-bottom:6px">Email</label>
+        <input type="email" id="auth-email" placeholder="vous@exemple.com" style="width:100%;background:var(--surface2);border:1px solid var(--border2);border-radius:8px;padding:10px 12px;color:var(--text);font-family:var(--font);font-size:14px">
+      </div>
+      <div style="margin-bottom:18px">
+        <label style="font-size:12px;color:var(--text2);display:block;margin-bottom:6px">Mot de passe</label>
+        <input type="password" id="auth-password" placeholder="••••••••" style="width:100%;background:var(--surface2);border:1px solid var(--border2);border-radius:8px;padding:10px 12px;color:var(--text);font-family:var(--font);font-size:14px">
+      </div>
+      <button id="auth-submit-btn" onclick="handleAuthSubmit()" style="width:100%;background:var(--blue);color:#fff;border:none;border-radius:8px;padding:12px;font-size:14px;font-weight:600;cursor:pointer;font-family:var(--font)">Se connecter</button>
+      <div style="text-align:center;margin-top:14px;font-size:13px;color:var(--text2)">
+        <span id="auth-toggle-text">Pas encore de compte ?</span>
+        <a href="#" onclick="toggleAuthMode();return false" id="auth-toggle-link" style="color:var(--blue2);text-decoration:none;font-weight:600">Créer un compte</a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="app" style="display:none">
+<div class="app">
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar" id="sidebar">
+    <div class="logo">
+      <div style="font-size:24px;margin-bottom:6px">🛡️</div>
+      <div class="logo-title">QualifManager</div>
+      <div class="logo-sub">v2.0 • multi-services</div>
+    </div>
+    <nav class="nav">
+      <div class="nav-section">Principal</div>
+      <div class="nav-item active" onclick="showPage('dashboard')" id="nav-dashboard">
+        <span class="nav-icon">📊</span> Tableau de bord
+      </div>
+      <div class="nav-item" onclick="showPage('alertes')" id="nav-alertes">
+        <span class="nav-icon">🔔</span> Alertes
+        <span class="nav-badge" id="badge-alertes">0</span>
+      </div>
+
+      <div class="nav-section">Matériel</div>
+      <div class="nav-item" onclick="showPage('materiel')" id="nav-materiel">
+        <span class="nav-icon">🔧</span> Tout le matériel
+      </div>
+      <div class="nav-item" onclick="showPage('plongee')" id="nav-plongee">
+        <span class="nav-icon">🤿</span> Plongée
+      </div>
+      <div class="nav-item" onclick="showPage('vehicules')" id="nav-vehicules">
+        <span class="nav-icon">🚛</span> Véhicules / Grues
+      </div>
+
+      <div class="nav-section">Personnel</div>
+      <div class="nav-item" onclick="showPage('personnel')" id="nav-personnel">
+        <span class="nav-icon">👥</span> Équipe
+      </div>
+      <div class="nav-item" onclick="showPage('diplomes')" id="nav-diplomes">
+        <span class="nav-icon">🎓</span> Diplômes & Aptitudes
+      </div>
+
+      <div class="nav-section">Documents</div>
+      <div class="nav-item" onclick="showPage('documents')" id="nav-documents">
+        <span class="nav-icon">📁</span> Documents scannés
+      </div>
+      <div class="nav-item" onclick="showPage('stats')" id="nav-stats">
+        <span class="nav-icon">📈</span> Statistiques
+      </div>
+    </nav>
+    <div class="sidebar-bottom">
+      <div class="user-card">
+        <div class="user-avatar" id="user-avatar">R</div>
+        <div>
+          <div class="user-name" id="user-name-display">Responsable</div>
+          <div class="user-role" id="user-role-display">Administrateur</div>
+        </div>
+      </div>
+      <div id="sync-status" style="font-size:11px;color:var(--text3);padding:6px 8px 0;display:flex;align-items:center;gap:6px">
+        <span id="sync-dot" style="width:6px;height:6px;border-radius:50%;background:var(--text3);display:inline-block"></span>
+        <span id="sync-label">Hors ligne</span>
+      </div>
+      <div onclick="handleLogout()" style="margin-top:10px;font-size:12px;color:var(--text2);cursor:pointer;padding:8px;text-align:center;border:1px solid var(--border);border-radius:8px" onmouseover="this.style.color='var(--red2)'" onmouseout="this.style.color='var(--text2)'">
+        ⏻ Déconnexion
+      </div>
+    </div>
+  </aside>
+  <div class="mobile-overlay" id="mobile-overlay" onclick="closeSidebar()"></div>
+
+  <!-- MAIN -->
+  <div class="main">
+    <div class="topbar">
+      <button class="menu-toggle" onclick="toggleSidebar()">☰</button>
+      <div class="topbar-title" id="topbar-title">Tableau de bord</div>
+      <div class="topbar-search">
+        <span style="color:var(--text3);font-size:14px">🔍</span>
+        <input type="text" placeholder="Rechercher matériel, personnel, qualification..." id="global-search" oninput="globalSearch(this.value)">
+      </div>
+      <div class="icon-btn" onclick="showPage('alertes')" data-tip="Alertes" id="notif-btn" style="position:relative">
+        🔔
+        <span id="notif-count" style="position:absolute;top:-4px;right:-4px;background:var(--red);color:#fff;font-size:9px;font-weight:700;padding:1px 5px;border-radius:10px;display:none">0</span>
+      </div>
+    </div>
+
+    <div class="content" id="page-content"></div>
+  </div>
+</div>
+
+<!-- MODAL AJOUT / EDITION -->
+<div class="modal-overlay" id="modal-main">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title" id="modal-title">Ajouter</div>
+      <button class="icon-btn" onclick="closeModal('modal-main')" style="border:none">✕</button>
+    </div>
+    <div class="modal-body" id="modal-body"></div>
+    <div class="modal-footer" id="modal-footer"></div>
+  </div>
+</div>
+
+<!-- MODAL DETAIL -->
+<div class="modal-overlay" id="modal-detail">
+  <div class="modal" style="max-width:680px">
+    <div class="modal-header">
+      <div class="modal-title" id="detail-title">Détail</div>
+      <button class="icon-btn" onclick="closeModal('modal-detail')" style="border:none">✕</button>
+    </div>
+    <div class="modal-body" id="detail-body"></div>
+    <div class="modal-footer" id="detail-footer"></div>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// SUPABASE CONFIG
+// ============================================================
+const SUPABASE_URL = 'VOTRE_URL_ICI';
+const SUPABASE_ANON_KEY = 'VOTRE_ANON_KEY_ICI';
+
+let sb = null;
+let currentUser = null;
+let realtimeChannels = [];
+
+if (SUPABASE_URL !== 'VOTRE_URL_ICI' && SUPABASE_ANON_KEY !== 'VOTRE_ANON_KEY_ICI') {
+  sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+}
+
+function setSyncStatus(state) {
+  // state: 'offline' | 'syncing' | 'online'
+  const dot = document.getElementById('sync-dot');
+  const label = document.getElementById('sync-label');
+  if (!dot || !label) return;
+  if (state === 'online') {
+    dot.style.background = 'var(--green)';
+    label.textContent = 'Synchronisé';
+  } else if (state === 'syncing') {
+    dot.style.background = 'var(--amber)';
+    label.textContent = 'Synchronisation…';
+  } else {
+    dot.style.background = 'var(--text3)';
+    label.textContent = 'Hors ligne';
+  }
+}
+
+let authMode = 'login'; // 'login' | 'signup'
+function toggleAuthMode() {
+  authMode = authMode === 'login' ? 'signup' : 'login';
+  document.getElementById('auth-submit-btn').textContent = authMode === 'login' ? 'Se connecter' : 'Créer le compte';
+  document.getElementById('auth-toggle-text').textContent = authMode === 'login' ? 'Pas encore de compte ?' : 'Déjà un compte ?';
+  document.getElementById('auth-toggle-link').textContent = authMode === 'login' ? 'Créer un compte' : 'Se connecter';
+  document.getElementById('auth-error').style.display = 'none';
+}
+
+function showAuthError(msg) {
+  const el = document.getElementById('auth-error');
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+
+async function handleAuthSubmit() {
+  if (!sb) {
+    showAuthError("Supabase n'est pas configuré. Vérifiez SUPABASE_URL et SUPABASE_ANON_KEY.");
+    return;
+  }
+  const email = document.getElementById('auth-email').value.trim();
+  const password = document.getElementById('auth-password').value;
+  if (!email || !password) { showAuthError('Email et mot de passe requis.'); return; }
+
+  const btn = document.getElementById('auth-submit-btn');
+  btn.disabled = true;
+  btn.textContent = '...';
+
+  try {
+    if (authMode === 'login') {
+      const { data, error } = await sb.auth.signInWithPassword({ email, password });
+      if (error) throw error;
+      await onAuthReady(data.user);
+    } else {
+      const { data, error } = await sb.auth.signUp({ email, password });
+      if (error) throw error;
+      if (data.user && !data.session) {
+        showAuthError('Compte créé. Si la confirmation par email est activée, vérifiez votre boîte mail avant de vous connecter.');
+        btn.disabled = false;
+        btn.textContent = 'Créer le compte';
+        return;
+      }
+      await onAuthReady(data.user);
+    }
+  } catch (err) {
+    showAuthError(err.message || "Erreur d'authentification.");
+    btn.disabled = false;
+    btn.textContent = authMode === 'login' ? 'Se connecter' : 'Créer le compte';
+  }
+}
+
+async function handleLogout() {
+  if (sb) {
+    realtimeChannels.forEach(ch => sb.removeChannel(ch));
+    realtimeChannels = [];
+    await sb.auth.signOut();
+  }
+  currentUser = null;
+  document.getElementById('app').style.display = 'none';
+  document.getElementById('auth-screen').style.display = 'flex';
+  document.getElementById('auth-email').value = '';
+  document.getElementById('auth-password').value = '';
+}
+
+async function onAuthReady(user) {
+  currentUser = user;
+  document.getElementById('auth-screen').style.display = 'none';
+  document.getElementById('app').style.display = '';
+  setSyncStatus('syncing');
+  await pullAllFromSupabase();
+  subscribeRealtime();
+  setSyncStatus('online');
+  generateNotifications();
+  updateBadges();
+  showPage('dashboard');
+}
+
+// Pull toutes les données depuis Supabase au démarrage / login
+async function pullAllFromSupabase() {
+  if (!sb || !currentUser) return;
+  try {
+    const [matRes, persRes, qualRes] = await Promise.all([
+      sb.from('equipements').select('*').eq('user_id', currentUser.id),
+      sb.from('personnel').select('*').eq('user_id', currentUser.id),
+      sb.from('qualifications').select('*').eq('user_id', currentUser.id),
+    ]);
+    if (matRes.error) throw matRes.error;
+    if (persRes.error) throw persRes.error;
+    if (qualRes.error) throw qualRes.error;
+
+    DB.materiel = (matRes.data || []).map(r => ({ ...r.data, id: r.id }));
+    DB.personnel = (persRes.data || []).map(r => ({ ...r.data, id: r.id }));
+    DB.qualifications = (qualRes.data || []).map(r => ({ ...r.data, id: r.id }));
+
+    localStorage.setItem('qm_materiel', JSON.stringify(DB.materiel));
+    localStorage.setItem('qm_personnel', JSON.stringify(DB.personnel));
+    localStorage.setItem('qm_qualifications', JSON.stringify(DB.qualifications));
+  } catch (err) {
+    console.error('Erreur pull Supabase:', err);
+    setSyncStatus('offline');
+  }
+}
+
+// Table Supabase correspondant à chaque clé DB locale
+const TABLE_MAP = { materiel: 'equipements', personnel: 'personnel', qualifications: 'qualifications' };
+
+// Upsert un item unique vers Supabase (appelé après chaque ajout/édition)
+async function syncUpsert(key, item) {
+  if (!sb || !currentUser) return;
+  const table = TABLE_MAP[key];
+  if (!table) return;
+  setSyncStatus('syncing');
+  try {
+    const { id, ...rest } = item;
+    const { error } = await sb.from(table).upsert({ id, data: rest, user_id: currentUser.id, updated_at: new Date().toISOString() });
+    if (error) throw error;
+    setSyncStatus('online');
+  } catch (err) {
+    console.error('Erreur sync upsert:', err);
+    setSyncStatus('offline');
+  }
+}
+
+// Suppression vers Supabase
+async function syncDelete(key, id) {
+  if (!sb || !currentUser) return;
+  const table = TABLE_MAP[key];
+  if (!table) return;
+  setSyncStatus('syncing');
+  try {
+    const { error } = await sb.from(table).delete().eq('id', id).eq('user_id', currentUser.id);
+    if (error) throw error;
+    setSyncStatus('online');
+  } catch (err) {
+    console.error('Erreur sync delete:', err);
+    setSyncStatus('offline');
+  }
+}
+
+// Abonnement temps réel : répercute les changements faits sur d'autres appareils
+function subscribeRealtime() {
+  if (!sb || !currentUser) return;
+  Object.entries(TABLE_MAP).forEach(([key, table]) => {
+    const channel = sb.channel('rt-' + table)
+      .on('postgres_changes', { event: '*', schema: 'public', table, filter: `user_id=eq.${currentUser.id}` }, (payload) => {
+        applyRealtimeChange(key, payload);
+      })
+      .subscribe();
+    realtimeChannels.push(channel);
+  });
+}
+
+function applyRealtimeChange(key, payload) {
+  const arr = DB[key];
+  if (payload.eventType === 'DELETE') {
+    const idx = arr.findIndex(x => x.id === payload.old.id);
+    if (idx !== -1) arr.splice(idx, 1);
+  } else {
+    const item = { ...payload.new.data, id: payload.new.id };
+    const idx = arr.findIndex(x => x.id === item.id);
+    if (idx !== -1) arr[idx] = item; else arr.push(item);
+  }
+  localStorage.setItem('qm_' + key, JSON.stringify(arr));
+  generateNotifications();
+  updateBadges();
+  // Re-render la page courante pour refléter le changement
+  if (typeof currentPage !== 'undefined' && currentPage) showPage(currentPage);
+}
+
+</script>
+
+<script>
+// ============================================================
+// DATA STORE
+// ============================================================
+const DB = {
+  materiel: JSON.parse(localStorage.getItem('qm_materiel') || '[]'),
+  personnel: JSON.parse(localStorage.getItem('qm_personnel') || '[]'),
+  qualifications: JSON.parse(localStorage.getItem('qm_qualifications') || '[]'),
+  documents: JSON.parse(localStorage.getItem('qm_documents') || '[]'),
+  notifications: JSON.parse(localStorage.getItem('qm_notifications') || '[]'),
+  settings: JSON.parse(localStorage.getItem('qm_settings') || '{"alertDays":30,"userName":"Responsable","userRole":"Administrateur","userInitials":"R"}'),
+};
+
+function save(key) {
+  localStorage.setItem('qm_' + key, JSON.stringify(DB[key]));
+}
+function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
+
+// Init demo data if empty
+if (!DB.materiel.length && (typeof SUPABASE_URL === 'undefined' || SUPABASE_URL === 'VOTRE_URL_ICI')) initDemoData();
+
+function initDemoData() {
+  const today = new Date();
+  const addDays = (d, n) => { const r = new Date(d); r.setDate(r.getDate()+n); return r.toISOString().split('T')[0]; };
+
+  DB.personnel = [
+    {id:uid(),nom:'Jean-Marc Dupont',poste:'Chef de plongée',service:'Plongée',color:'#1e6bff',qualifs:[]},
+    {id:uid(),nom:'Sophie Martin',poste:'Plongeuse N2',service:'Plongée',color:'#00c8e0',qualifs:[]},
+    {id:uid(),nom:'Pierre Rousseau',poste:'Chauffeur PL',service:'Logistique',color:'#34c759',qualifs:[]},
+    {id:uid(),nom:'Marie Leblanc',poste:'Grutière',service:'Engins',color:'#ff9500',qualifs:[]},
+  ];
+
+  DB.materiel = [
+    {id:uid(),nom:'Bloc 12L — B047',ref:'UW-2019-047',categorie:'Bouteille',souscat:'Bouteille plongée',dateValidite:addDays(today,-10),organisme:'Bureau Veritas',notes:''},
+    {id:uid(),nom:'Bloc 15L — B062',ref:'UW-2021-062',categorie:'Bouteille',souscat:'Bouteille plongée',dateValidite:addDays(today,18),organisme:'Apave',notes:''},
+    {id:uid(),nom:'Détendeur Mk25 — D012',ref:'SP-MK25-0012',categorie:'Plongée',souscat:'Détendeur',dateValidite:addDays(today,22),organisme:'ScubaPro SAV',notes:''},
+    {id:uid(),nom:'Camion Iveco — AA-123-BB',ref:'AA-123-BB',categorie:'Véhicule',souscat:'Poids lourd',dateValidite:addDays(today,85),organisme:'Contrôle technique',notes:''},
+    {id:uid(),nom:'Grue Liebherr LTM 1030',ref:'LBH-2018-03',categorie:'Engin',souscat:'Grue mobile',dateValidite:addDays(today,15),organisme:'Véritas',notes:''},
+    {id:uid(),nom:'Combinaison étanche — C003',ref:'DRS-C-0003',categorie:'EPI',souscat:'Combinaison',dateValidite:addDays(today,95),organisme:'',notes:''},
+    {id:uid(),nom:'Remorque plateau — AR-456-CD',ref:'AR-456-CD',categorie:'Véhicule',souscat:'Remorque',dateValidite:addDays(today,-5),organisme:'Contrôle technique',notes:''},
+    {id:uid(),nom:'Compresseur BAUER Oceanus',ref:'BAU-2022-01',categorie:'Plongée',souscat:'Compresseur',dateValidite:addDays(today,120),organisme:'BAUER service',notes:''},
+  ];
+
+  const pid = DB.personnel.map(p=>p.id);
+  DB.qualifications = [
+    {id:uid(),personnelId:pid[0],type:'Aptitude médicale',nom:'Certificat médical plongée',dateValidite:addDays(today,20),organisme:'Dr. Bernard',notes:''},
+    {id:uid(),personnelId:pid[0],type:'Diplôme',nom:'BEES1 Plongée',dateValidite:addDays(today,365*3),organisme:'FFESSM',notes:'Diplôme permanent'},
+    {id:uid(),personnelId:pid[1],type:'Aptitude médicale',nom:'Certificat médical plongée',dateValidite:addDays(today,-15),organisme:'Dr. Bernard',notes:'À renouveler'},
+    {id:uid(),personnelId:pid[1],type:'Diplôme',nom:'PADI Advanced',dateValidite:addDays(today,365),organisme:'PADI',notes:''},
+    {id:uid(),personnelId:pid[2],type:'Permis / Habilitation',nom:'Permis C + EC',dateValidite:addDays(today,400),organisme:'Préfecture',notes:''},
+    {id:uid(),personnelId:pid[2],type:'Formation',nom:'FCO Marchandises',dateValidite:addDays(today,25),organisme:'AFTRAL',notes:''},
+    {id:uid(),personnelId:pid[3],type:'Permis / Habilitation',nom:'CACES Grue R483',dateValidite:addDays(today,8),organisme:'APAVE',notes:''},
+    {id:uid(),personnelId:pid[3],type:'Aptitude médicale',nom:'Visite médicale conducteur engins',dateValidite:addDays(today,180),organisme:'Médecine du travail',notes:''},
+  ];
+
+  // Link qualifs to personnel
+  DB.qualifications.forEach(q => {
+    const p = DB.personnel.find(p => p.id === q.personnelId);
+    if (p) p.qualifs.push(q.id);
+  });
+
+  save('materiel'); save('personnel'); save('qualifications'); save('documents');
+  generateNotifications();
+}
+
+function generateNotifications() {
+  DB.notifications = [];
+  const alertDays = DB.settings.alertDays || 30;
+  const today = new Date(); today.setHours(0,0,0,0);
+
+  [...DB.materiel].forEach(m => {
+    const {status, days} = getStatus(m.dateValidite);
+    if (status === 'expired') DB.notifications.push({id:uid(),type:'expired',title:`${m.nom} — Expiré`,sub:`Requalification dépassée de ${Math.abs(days)} jour(s)`,ref:m.id,cat:'materiel',read:false,date:new Date().toISOString()});
+    else if (status === 'soon') DB.notifications.push({id:uid(),type:'soon',title:`${m.nom}`,sub:`Expire dans ${days} jour(s)`,ref:m.id,cat:'materiel',read:false,date:new Date().toISOString()});
+  });
+  [...DB.qualifications].forEach(q => {
+    const p = DB.personnel.find(x=>x.id===q.personnelId);
+    const pnom = p ? p.nom : 'Inconnu';
+    const {status, days} = getStatus(q.dateValidite);
+    if (status === 'expired') DB.notifications.push({id:uid(),type:'expired',title:`${q.nom} — ${pnom}`,sub:`Expiré depuis ${Math.abs(days)} jour(s)`,ref:q.id,cat:'qualification',read:false,date:new Date().toISOString()});
+    else if (status === 'soon') DB.notifications.push({id:uid(),type:'soon',title:`${q.nom} — ${pnom}`,sub:`Expire dans ${days} jour(s)`,ref:q.id,cat:'qualification',read:false,date:new Date().toISOString()});
+  });
+  save('notifications');
+}
+
+// ============================================================
+// UTILS
+// ============================================================
+function getStatus(dateStr) {
+  if (!dateStr) return {status:'unknown',days:0,label:'—'};
+  const today = new Date(); today.setHours(0,0,0,0);
+  const d = new Date(dateStr);
+  const days = Math.ceil((d - today) / 86400000);
+  if (days < 0) return {status:'expired',days,label:`Expiré (${Math.abs(days)}j)`};
+  if (days <= (DB.settings.alertDays||30)) return {status:'soon',days,label:`${days}j`};
+  return {status:'ok',days,label:'Valide'};
+}
+
+function fmtDate(s) {
+  if (!s) return '—';
+  const [y,m,d] = s.split('-');
+  return `${d}/${m}/${y}`;
+}
+
+function badgeFor(dateStr) {
+  const {status,label} = getStatus(dateStr);
+  if (status==='expired') return `<span class="badge badge-red"><span class="dot dot-red"></span>${label}</span>`;
+  if (status==='soon') return `<span class="badge badge-amber"><span class="dot dot-amber"></span>${label}</span>`;
+  if (status==='ok') return `<span class="badge badge-green"><span class="dot dot-green"></span>Valide</span>`;
+  return `<span class="badge badge-gray">—</span>`;
+}
+
+function catIcon(cat) {
+  const icons = {Bouteille:'🫧',Plongée:'🤿',Véhicule:'🚛',Engin:'🏗️',EPI:'🦺',Autre:'📦','Aptitude médicale':'🏥',Diplôme:'🎓','Permis / Habilitation':'📋',Formation:'📚'};
+  return icons[cat] || '📦';
+}
+
+function countAlerts() {
+  return DB.notifications.filter(n=>!n.read).length;
+}
+
+function updateBadges() {
+  const c = countAlerts();
+  document.getElementById('badge-alertes').textContent = c;
+  document.getElementById('badge-alertes').style.display = c ? '' : 'none';
+  const nc = document.getElementById('notif-count');
+  nc.textContent = c; nc.style.display = c ? '' : 'none';
+}
+
+// ============================================================
+// NAVIGATION
+// ============================================================
+let currentPage = 'dashboard';
+function showPage(page) {
+  currentPage = page;
+  document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+  const nav = document.getElementById('nav-' + page);
+  if (nav) nav.classList.add('active');
+  const titles = {dashboard:'Tableau de bord',alertes:'Alertes & Notifications',materiel:'Tout le matériel',plongee:'Matériel de plongée',vehicules:'Véhicules & Engins',personnel:'Gestion de l\'équipe',diplomes:'Diplômes & Aptitudes',documents:'Documents scannés',stats:'Statistiques'};
+  document.getElementById('topbar-title').textContent = titles[page] || page;
+  const pages = {dashboard:renderDashboard,alertes:renderAlertes,materiel:()=>renderMaterielPage('all'),plongee:()=>renderMaterielPage('plongee'),vehicules:()=>renderMaterielPage('vehicules'),personnel:renderPersonnel,diplomes:renderDiplomes,documents:renderDocuments,stats:renderStats};
+  const fn = pages[page];
+  if (fn) document.getElementById('page-content').innerHTML = fn();
+  updateBadges();
+  closeSidebar();
+}
+
+function toggleSidebar() {
+  document.getElementById('sidebar').classList.toggle('open');
+  document.getElementById('mobile-overlay').classList.toggle('open');
+}
+function closeSidebar() {
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('mobile-overlay').classList.remove('open');
+}
+
+// ============================================================
+// DASHBOARD
+// ============================================================
+function renderDashboard() {
+  generateNotifications();
+  const allItems = [...DB.materiel, ...DB.qualifications];
+  const expired = allItems.filter(x => getStatus(x.dateValidite).status === 'expired').length;
+  const soon = allItems.filter(x => getStatus(x.dateValidite).status === 'soon').length;
+  const ok = allItems.filter(x => getStatus(x.dateValidite).status === 'ok').length;
+  const total = allItems.length;
+
+  const urgents = allItems.filter(x => ['expired','soon'].includes(getStatus(x.dateValidite).status))
+    .sort((a,b) => new Date(a.dateValidite) - new Date(b.dateValidite)).slice(0,8);
+
+  const matRows = urgents.map(item => {
+    const isQualif = !!item.personnelId;
+    const p = isQualif ? DB.personnel.find(x=>x.id===item.personnelId) : null;
+    return `<tr>
+      <td><div class="td-name">${item.nom || item.type}</div><div class="td-sub">${isQualif && p ? '👤 '+p.nom : (item.ref||'')}</div></td>
+      <td><span class="cat-chip">${catIcon(item.categorie||item.type)} ${item.categorie||item.type}</span></td>
+      <td>${fmtDate(item.dateValidite)}</td>
+      <td>${badgeFor(item.dateValidite)}</td>
+      <td>${item.organisme||'—'}</td>
+    </tr>`;
+  }).join('');
+
+  // Conformité par catégorie
+  const cats = ['Bouteille','Plongée','Véhicule','Engin','EPI'];
+  const catStats = cats.map(cat => {
+    const items = DB.materiel.filter(m=>m.categorie===cat);
+    if (!items.length) return null;
+    const ok = items.filter(m=>getStatus(m.dateValidite).status==='ok').length;
+    const pct = Math.round((ok/items.length)*100);
+    const color = pct>=80?'var(--green)':pct>=50?'var(--amber)':'var(--red)';
+    return `<div style="margin-bottom:12px">
+      <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
+        <span style="color:var(--text2)">${catIcon(cat)} ${cat}</span>
+        <span style="font-weight:600;color:${color}">${pct}%</span>
+      </div>
+      <div class="progress-bar"><div class="progress-fill" style="width:${pct}%;background:${color}"></div></div>
+    </div>`;
+  }).filter(Boolean).join('');
+
+  return `
+  ${expired>0?`<div class="alert-bar"><span class="alert-bar-icon">🚨</span><div class="alert-bar-text"><strong><span class="alert-bar-count">${expired} qualification${expired>1?'s':''} expirée${expired>1?'s':''}</span></strong> — Action immédiate requise</div><button class="btn btn-sm" style="background:var(--red);color:#fff;border:none" onclick="showPage('alertes')">Voir</button></div>`:''}
+  ${soon>0?`<div class="alert-bar amber"><span class="alert-bar-icon">⚠️</span><div class="alert-bar-text"><strong><span class="alert-bar-count">${soon} expiration${soon>1?'s':''}</span></strong> dans moins de ${DB.settings.alertDays||30} jours</div><button class="btn btn-sm" style="background:var(--amber);color:#fff;border:none" onclick="showPage('alertes')">Voir</button></div>`:''}
+
+  <div class="stats-grid">
+    <div class="stat-card red"><span class="stat-icon">🚨</span><div class="stat-num red">${expired}</div><div class="stat-label">Expirés</div></div>
+    <div class="stat-card amber"><span class="stat-icon">⏳</span><div class="stat-num amber">${soon}</div><div class="stat-label">Expirent bientôt</div></div>
+    <div class="stat-card green"><span class="stat-icon">✅</span><div class="stat-num green">${ok}</div><div class="stat-label">Valides</div></div>
+    <div class="stat-card blue"><span class="stat-icon">📋</span><div class="stat-num blue">${total}</div><div class="stat-label">Total</div></div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 320px;gap:20px;align-items:start">
+    <div>
+      <div class="section-title">⚠️ Urgences prioritaires</div>
+      ${urgents.length ? `<div class="table-wrap"><table>
+        <thead><tr><th>Désignation</th><th>Catégorie</th><th>Validité</th><th>Statut</th><th>Organisme</th></tr></thead>
+        <tbody>${matRows}</tbody>
+      </table></div>` : '<div class="card" style="text-align:center;padding:30px;color:var(--green2)">✅ Aucune urgence — Tout est à jour !</div>'}
+    </div>
+    <div>
+      <div class="section-title">📊 Conformité par catégorie</div>
+      <div class="card">${catStats || '<div class="empty-sub">Aucune donnée</div>'}</div>
+      <div style="margin-top:14px">
+        <div class="section-title">⚡ Actions rapides</div>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <button class="btn btn-ghost" style="justify-content:flex-start" onclick="openAddMateriel()">➕ Ajouter du matériel</button>
+          <button class="btn btn-ghost" style="justify-content:flex-start" onclick="openAddPersonnel()">👤 Ajouter un agent</button>
+          <button class="btn btn-ghost" style="justify-content:flex-start" onclick="openAddQualif(null)">🎓 Ajouter une qualification</button>
+          <button class="btn btn-ghost" style="justify-content:flex-start" onclick="showPage('documents')">📄 Importer un document</button>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+// ============================================================
+// ALERTES
+// ============================================================
+function renderAlertes() {
+  generateNotifications();
+  const expired = DB.notifications.filter(n=>n.type==='expired');
+  const soon = DB.notifications.filter(n=>n.type==='soon');
+
+  const renderNotifs = (list) => list.map(n => `
+    <div class="notif-item ${n.read?'':'unread'}">
+      <span class="notif-icon">${n.type==='expired'?'🔴':'🟡'}</span>
+      <div class="notif-body">
+        <div class="notif-title">${n.title}</div>
+        <div class="notif-sub">${n.sub}</div>
+        <div class="notif-time">${n.cat==='materiel'?'Matériel':'Qualification personnel'}</div>
+      </div>
+      <button class="btn btn-ghost btn-sm" onclick="markRead('${n.id}')">✓</button>
+    </div>`).join('');
+
+  return `
+  <div class="page-header">
+    <div><div class="page-title">Alertes & Notifications</div><div class="page-sub">${DB.notifications.filter(n=>!n.read).length} non lues</div></div>
+    <div class="header-actions">
+      <button class="btn btn-ghost" onclick="markAllRead()">Tout marquer lu</button>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr;gap:20px">
+    <div>
+      <div class="section-title" style="color:var(--red2)">🔴 Expirations passées (${expired.length})</div>
+      ${expired.length ? `<div class="notif-list">${renderNotifs(expired)}</div>` : '<div class="card card-sm" style="color:var(--green2)">✅ Aucune expiration passée</div>'}
+    </div>
+    <div>
+      <div class="section-title" style="color:var(--amber2)">🟡 Expirations à venir (${soon.length})</div>
+      ${soon.length ? `<div class="notif-list">${renderNotifs(soon)}</div>` : '<div class="card card-sm" style="color:var(--green2)">✅ Aucune expiration imminente</div>'}
+    </div>
+  </div>
+
+  <div style="margin-top:28px" class="card">
+    <div class="section-title" style="margin-bottom:16px">⚙️ Paramètre d'alerte</div>
+    <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+      <span style="font-size:13px;color:var(--text2)">Alerter</span>
+      <input type="number" id="alert-days-input" value="${DB.settings.alertDays||30}" min="1" max="180"
+        style="width:80px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:14px;color:var(--text);text-align:center;outline:none">
+      <span style="font-size:13px;color:var(--text2)">jours avant expiration</span>
+      <button class="btn btn-primary btn-sm" onclick="saveAlertDays()">Enregistrer</button>
+    </div>
+  </div>`;
+}
+
+function markRead(id) {
+  const n = DB.notifications.find(x=>x.id===id);
+  if (n) { n.read = true; save('notifications'); showPage('alertes'); }
+}
+function markAllRead() {
+  DB.notifications.forEach(n=>n.read=true);
+  save('notifications'); showPage('alertes');
+}
+function saveAlertDays() {
+  const v = parseInt(document.getElementById('alert-days-input').value);
+  if (v>0) { DB.settings.alertDays = v; save('settings'); showPage('alertes'); }
+}
+
+// ============================================================
+// MATERIEL
+// ============================================================
+function renderMaterielPage(filter) {
+  let items = DB.materiel;
+  let title = 'Tout le matériel';
+  if (filter==='plongee') { items = items.filter(m=>['Bouteille','Plongée','EPI'].includes(m.categorie)); title='Matériel de plongée'; }
+  if (filter==='vehicules') { items = items.filter(m=>['Véhicule','Engin'].includes(m.categorie)); title='Véhicules & Engins'; }
+
+  const cats = ['Tous','Bouteille','Plongée','EPI','Véhicule','Engin','Autre'];
+  const rows = items.map(m => `
+    <tr onclick="openDetailMateriel('${m.id}')" style="cursor:pointer">
+      <td><div class="td-name">${m.nom}</div><div class="td-sub">${m.ref||''}</div></td>
+      <td><span class="cat-chip">${catIcon(m.categorie)} ${m.categorie}</span></td>
+      <td>${m.souscat||'—'}</td>
+      <td>${fmtDate(m.dateValidite)}</td>
+      <td>${badgeFor(m.dateValidite)}</td>
+      <td>${m.organisme||'—'}</td>
+      <td onclick="event.stopPropagation()" style="white-space:nowrap">
+        <button class="btn btn-ghost btn-sm" onclick="openEditMateriel('${m.id}')">✏️</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteMateriel('${m.id}')">🗑</button>
+      </td>
+    </tr>`).join('');
+
+  return `
+  <div class="page-header">
+    <div><div class="page-title">${title}</div><div class="page-sub">${items.length} équipement${items.length>1?'s':''}</div></div>
+    <div class="header-actions">
+      <button class="btn btn-ghost" onclick="exportExcel('materiel')">⬇️ Export Excel</button>
+      <button class="btn btn-primary" onclick="openAddMateriel()">➕ Ajouter</button>
+    </div>
+  </div>
+  ${items.length ? `<div class="table-wrap"><table>
+    <thead><tr><th>Désignation / Référence</th><th>Catégorie</th><th>Type</th><th>Validité</th><th>Statut</th><th>Organisme</th><th>Actions</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table></div>` : `<div class="empty"><div class="empty-icon">🔧</div><div class="empty-text">Aucun matériel</div><div class="empty-sub">Cliquez sur "Ajouter" pour commencer</div></div>`}`;
+}
+
+function openAddMateriel(id) {
+  const m = id ? DB.materiel.find(x=>x.id===id) : null;
+  document.getElementById('modal-title').textContent = m ? 'Modifier le matériel' : 'Ajouter du matériel';
+  document.getElementById('modal-body').innerHTML = `
+  <div style="margin-bottom:16px">
+    <div class="scan-zone" onclick="document.getElementById('file-scan-mat').click()">
+      <span class="scan-zone-icon">📷</span>
+      <p>Scanner / importer un document de requalification</p>
+      <p class="scan-hint">Photo, PDF, Word, Excel — L'IA lit les informations automatiquement</p>
+      <span class="ai-badge">✨ Analyse IA incluse</span>
+    </div>
+    <input type="file" id="file-scan-mat" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" style="display:none" onchange="handleFileScan(event,'mat')">
+    <div id="scan-result-mat" style="display:none" class="card card-sm" style="margin-top:8px"></div>
+  </div>
+  <div class="form-grid">
+    <div class="field field-full"><label>Nom / désignation *</label><input id="mat-nom" value="${m?.nom||''}" placeholder="Ex : Bloc 12L — B047"></div>
+    <div class="field"><label>Référence / N° de série</label><input id="mat-ref" value="${m?.ref||''}" placeholder="Ex : UW-2024-047"></div>
+    <div class="field"><label>Catégorie *</label><select id="mat-cat">
+      ${['Bouteille','Plongée','EPI','Véhicule','Engin','Autre'].map(c=>`<option value="${c}" ${m?.categorie===c?'selected':''}>${catIcon(c)} ${c}</option>`).join('')}
+    </select></div>
+    <div class="field"><label>Sous-type</label><input id="mat-souscat" value="${m?.souscat||''}" placeholder="Ex : Détendeur, Camion, Grue..."></div>
+    <div class="field"><label>Date de fin de validité *</label><input type="date" id="mat-date" value="${m?.dateValidite||''}"></div>
+    <div class="field"><label>Organisme certificateur</label><input id="mat-org" value="${m?.organisme||''}" placeholder="Ex : Bureau Veritas, APAVE..."></div>
+    <div class="field field-full"><label>Notes</label><textarea id="mat-notes">${m?.notes||''}</textarea></div>
+  </div>`;
+  document.getElementById('modal-footer').innerHTML = `
+    <button class="btn btn-ghost" onclick="closeModal('modal-main')">Annuler</button>
+    <button class="btn btn-primary" onclick="saveMateriel('${id||''}')">💾 Enregistrer</button>`;
+  openModal('modal-main');
+}
+function openEditMateriel(id) { openAddMateriel(id); }
+
+function saveMateriel(id) {
+  const nom = document.getElementById('mat-nom').value.trim();
+  const date = document.getElementById('mat-date').value;
+  if (!nom || !date) { alert('Nom et date requis'); return; }
+  const data = {
+    nom, ref:document.getElementById('mat-ref').value.trim(),
+    categorie:document.getElementById('mat-cat').value,
+    souscat:document.getElementById('mat-souscat').value.trim(),
+    dateValidite:date,
+    organisme:document.getElementById('mat-org').value.trim(),
+    notes:document.getElementById('mat-notes').value.trim(),
+  };
+  if (id) {
+    const idx = DB.materiel.findIndex(x=>x.id===id);
+    if (idx>=0) DB.materiel[idx] = {...DB.materiel[idx],...data};
+  } else { DB.materiel.push({id:uid(),...data}); }
+  save('materiel');
+  const savedMat = id ? DB.materiel.find(x=>x.id===id) : DB.materiel[DB.materiel.length-1];
+  syncUpsert('materiel', savedMat);
+  closeModal('modal-main'); showPage(currentPage);
+}
+
+function deleteMateriel(id) {
+  if (!confirm('Supprimer cet équipement ?')) return;
+  DB.materiel = DB.materiel.filter(x=>x.id!==id);
+  save('materiel');
+  syncDelete('materiel', id);
+  showPage(currentPage);
+}
+
+function openDetailMateriel(id) {
+  const m = DB.materiel.find(x=>x.id===id);
+  if (!m) return;
+  const docs = DB.documents.filter(d=>d.refId===id);
+  document.getElementById('detail-title').textContent = m.nom;
+  document.getElementById('detail-body').innerHTML = `
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
+    <div class="card card-sm"><div style="font-size:11px;color:var(--text3);margin-bottom:4px">Référence</div><div style="font-weight:500">${m.ref||'—'}</div></div>
+    <div class="card card-sm"><div style="font-size:11px;color:var(--text3);margin-bottom:4px">Catégorie</div><div>${catIcon(m.categorie)} ${m.categorie} ${m.souscat?'· '+m.souscat:''}</div></div>
+    <div class="card card-sm"><div style="font-size:11px;color:var(--text3);margin-bottom:4px">Validité</div><div style="font-weight:500">${fmtDate(m.dateValidite)}</div></div>
+    <div class="card card-sm"><div style="font-size:11px;color:var(--text3);margin-bottom:4px">Statut</div>${badgeFor(m.dateValidite)}</div>
+    <div class="card card-sm field-full" style="grid-column:1/-1"><div style="font-size:11px;color:var(--text3);margin-bottom:4px">Organisme</div><div>${m.organisme||'—'}</div></div>
+    ${m.notes?`<div class="card card-sm" style="grid-column:1/-1"><div style="font-size:11px;color:var(--text3);margin-bottom:4px">Notes</div><div style="font-size:13px;color:var(--text2)">${m.notes}</div></div>`:''}
+  </div>
+  <div class="section-title">📁 Documents liés (${docs.length})</div>
+  ${docs.length ? docs.map(d=>`<div class="doc-item"><span class="doc-icon">📄</span><span class="doc-name">${d.nom}</span><span class="doc-size">${d.date||''}</span></div>`).join('') : '<div style="color:var(--text3);font-size:13px">Aucun document lié</div>'}
+  <button class="btn btn-ghost btn-sm" style="margin-top:10px" onclick="openUploadDoc('${id}')">📎 Attacher un document</button>`;
+  document.getElementById('detail-footer').innerHTML = `
+    <button class="btn btn-ghost" onclick="closeModal('modal-detail')">Fermer</button>
+    <button class="btn btn-primary" onclick="closeModal('modal-detail');openEditMateriel('${id}')">✏️ Modifier</button>`;
+  openModal('modal-detail');
+}
+
+// ============================================================
+// PERSONNEL
+// ============================================================
+function renderPersonnel() {
+  const cards = DB.personnel.map(p => {
+    const qualifs = DB.qualifications.filter(q=>q.personnelId===p.id);
+    const urgent = qualifs.filter(q=>['expired','soon'].includes(getStatus(q.dateValidite).status));
+    const preview = qualifs.slice(0,3);
+    return `<div class="person-card" onclick="openDetailPersonnel('${p.id}')">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div class="person-avatar" style="background:${p.color||'var(--blue)'};">${p.nom.split(' ').map(x=>x[0]).join('').slice(0,2).toUpperCase()}</div>
+        ${urgent.length?`<span class="badge badge-red">⚠️ ${urgent.length}</span>`:'<span class="badge badge-green">✅ OK</span>'}
+      </div>
+      <div class="person-name">${p.nom}</div>
+      <div class="person-role">${p.poste||''} ${p.service?'· '+p.service:''}</div>
+      <div class="person-qualifs">
+        ${preview.map(q=>`<div class="qualif-mini"><span class="qualif-mini-name">${q.nom}</span>${badgeFor(q.dateValidite)}</div>`).join('')}
+        ${qualifs.length>3?`<div class="more-badge">+${qualifs.length-3} autre${qualifs.length-3>1?'s':''}</div>`:''}
+        ${!qualifs.length?'<div style="color:var(--text3);font-size:12px">Aucune qualification enregistrée</div>':''}
+      </div>
+    </div>`;
+  }).join('');
+
+  return `
+  <div class="page-header">
+    <div><div class="page-title">Équipe</div><div class="page-sub">${DB.personnel.length} agent${DB.personnel.length>1?'s':''}</div></div>
+    <div class="header-actions">
+      <button class="btn btn-ghost" onclick="exportExcel('personnel')">⬇️ Export</button>
+      <button class="btn btn-primary" onclick="openAddPersonnel()">➕ Ajouter un agent</button>
+    </div>
+  </div>
+  ${DB.personnel.length ? `<div class="person-grid">${cards}</div>` : '<div class="empty"><div class="empty-icon">👥</div><div class="empty-text">Aucun agent</div></div>'}`;
+}
+
+function openAddPersonnel(id) {
+  const p = id ? DB.personnel.find(x=>x.id===id) : null;
+  const colors = ['#1e6bff','#00c8e0','#34c759','#ff9500','#ff3b30','#bf5af2','#ff2d55'];
+  document.getElementById('modal-title').textContent = p ? 'Modifier l\'agent' : 'Ajouter un agent';
+  document.getElementById('modal-body').innerHTML = `
+  <div class="form-grid">
+    <div class="field field-full"><label>Nom complet *</label><input id="p-nom" value="${p?.nom||''}" placeholder="Prénom Nom"></div>
+    <div class="field"><label>Poste</label><input id="p-poste" value="${p?.poste||''}" placeholder="Ex : Chef de plongée"></div>
+    <div class="field"><label>Service</label><input id="p-service" value="${p?.service||''}" placeholder="Ex : Plongée, Logistique..."></div>
+    <div class="field field-full"><label>Couleur d'identification</label>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px">
+        ${colors.map(c=>`<div onclick="selectColor(this,'${c}')" style="width:28px;height:28px;border-radius:50%;background:${c};cursor:pointer;border:2px solid ${p?.color===c?'white':'transparent'};transition:border 0.15s" data-color="${c}"></div>`).join('')}
+      </div>
+      <input type="hidden" id="p-color" value="${p?.color||colors[0]}">
+    </div>
+  </div>`;
+  document.getElementById('modal-footer').innerHTML = `
+    <button class="btn btn-ghost" onclick="closeModal('modal-main')">Annuler</button>
+    <button class="btn btn-primary" onclick="savePersonnel('${id||''}')">💾 Enregistrer</button>`;
+  openModal('modal-main');
+}
+
+function selectColor(el, color) {
+  document.querySelectorAll('[data-color]').forEach(e => e.style.borderColor='transparent');
+  el.style.borderColor = 'white';
+  document.getElementById('p-color').value = color;
+}
+
+function savePersonnel(id) {
+  const nom = document.getElementById('p-nom').value.trim();
+  if (!nom) { alert('Nom requis'); return; }
+  const data = { nom, poste:document.getElementById('p-poste').value.trim(), service:document.getElementById('p-service').value.trim(), color:document.getElementById('p-color').value };
+  if (id) {
+    const idx = DB.personnel.findIndex(x=>x.id===id);
+    if (idx>=0) DB.personnel[idx] = {...DB.personnel[idx],...data};
+  } else { DB.personnel.push({id:uid(),qualifs:[],...data}); }
+  save('personnel');
+  const savedPers = id ? DB.personnel.find(x=>x.id===id) : DB.personnel[DB.personnel.length-1];
+  syncUpsert('personnel', savedPers);
+  closeModal('modal-main'); showPage('personnel');
+}
+
+function openDetailPersonnel(id) {
+  const p = DB.personnel.find(x=>x.id===id);
+  if (!p) return;
+  const qualifs = DB.qualifications.filter(q=>q.personnelId===id);
+  const qRows = qualifs.map(q=>`
+    <tr>
+      <td><div class="td-name">${q.nom}</div></td>
+      <td><span class="cat-chip">${catIcon(q.type)} ${q.type}</span></td>
+      <td>${fmtDate(q.dateValidite)}</td>
+      <td>${badgeFor(q.dateValidite)}</td>
+      <td>${q.organisme||'—'}</td>
+      <td onclick="event.stopPropagation()" style="white-space:nowrap">
+        <button class="btn btn-ghost btn-sm" onclick="openAddQualif('${id}','${q.id}')">✏️</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteQualif('${q.id}','${id}')">🗑</button>
+      </td>
+    </tr>`).join('');
+
+  document.getElementById('detail-title').innerHTML = `<div style="display:flex;align-items:center;gap:12px"><div class="person-avatar" style="background:${p.color||'var(--blue)'};width:38px;height:38px;font-size:14px">${p.nom.split(' ').map(x=>x[0]).join('').slice(0,2).toUpperCase()}</div>${p.nom}</div>`;
+  document.getElementById('detail-body').innerHTML = `
+  <div style="display:flex;gap:10px;margin-bottom:20px;flex-wrap:wrap">
+    <span class="badge badge-blue">💼 ${p.poste||'—'}</span>
+    <span class="badge badge-gray">🏢 ${p.service||'—'}</span>
+  </div>
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+    <div class="section-title" style="margin-bottom:0">Qualifications & Diplômes (${qualifs.length})</div>
+    <button class="btn btn-primary btn-sm" onclick="closeModal('modal-detail');openAddQualif('${id}')">➕ Ajouter</button>
+  </div>
+  ${qualifs.length ? `<div class="table-wrap"><table>
+    <thead><tr><th>Qualification / Diplôme</th><th>Type</th><th>Validité</th><th>Statut</th><th>Organisme</th><th>Actions</th></tr></thead>
+    <tbody>${qRows}</tbody>
+  </table></div>` : '<div style="color:var(--text3);font-size:13px;padding:16px 0">Aucune qualification enregistrée</div>'}`;
+  document.getElementById('detail-footer').innerHTML = `
+    <button class="btn btn-ghost" onclick="closeModal('modal-detail')">Fermer</button>
+    <button class="btn btn-ghost" onclick="closeModal('modal-detail');openAddPersonnel('${id}')">✏️ Modifier</button>
+    <button class="btn btn-danger" onclick="deletePersonnel('${id}')">🗑 Supprimer</button>`;
+  openModal('modal-detail');
+}
+
+function deletePersonnel(id) {
+  if (!confirm('Supprimer cet agent et toutes ses qualifications ?')) return;
+  const qualifsToDelete = DB.qualifications.filter(x=>x.personnelId===id).map(x=>x.id);
+  DB.personnel = DB.personnel.filter(x=>x.id!==id);
+  DB.qualifications = DB.qualifications.filter(x=>x.personnelId!==id);
+  save('personnel'); save('qualifications');
+  syncDelete('personnel', id);
+  qualifsToDelete.forEach(qid => syncDelete('qualifications', qid));
+  closeModal('modal-detail'); showPage('personnel');
+}
+
+// ============================================================
+// QUALIFICATIONS
+// ============================================================
+function renderDiplomes() {
+  const types = ['Tous','Aptitude médicale','Diplôme','Permis / Habilitation','Formation'];
+  const rows = DB.qualifications.map(q => {
+    const p = DB.personnel.find(x=>x.id===q.personnelId);
+    return `<tr>
+      <td><div class="td-name">${q.nom}</div><div class="td-sub">${q.organisme||''}</div></td>
+      <td><span class="cat-chip">${catIcon(q.type)} ${q.type}</span></td>
+      <td><div style="display:flex;align-items:center;gap:8px"><div class="person-avatar" style="background:${p?.color||'var(--blue)'};width:24px;height:24px;font-size:10px;flex-shrink:0">${p?.nom.split(' ').map(x=>x[0]).join('').slice(0,2).toUpperCase()||'?'}</div><span>${p?.nom||'—'}</span></div></td>
+      <td>${fmtDate(q.dateValidite)}</td>
+      <td>${badgeFor(q.dateValidite)}</td>
+      <td onclick="event.stopPropagation()" style="white-space:nowrap">
+        <button class="btn btn-ghost btn-sm" onclick="openAddQualif('${q.personnelId}','${q.id}')">✏️</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteQualif('${q.id}',null)">🗑</button>
+      </td>
+    </tr>`;
+  }).join('');
+
+  return `
+  <div class="page-header">
+    <div><div class="page-title">Diplômes & Aptitudes</div><div class="page-sub">${DB.qualifications.length} qualification${DB.qualifications.length>1?'s':''}</div></div>
+    <div class="header-actions">
+      <button class="btn btn-ghost" onclick="exportExcel('qualifications')">⬇️ Export</button>
+      <button class="btn btn-primary" onclick="openAddQualif(null)">➕ Ajouter</button>
+    </div>
+  </div>
+  ${DB.qualifications.length ? `<div class="table-wrap"><table>
+    <thead><tr><th>Qualification / Diplôme</th><th>Type</th><th>Agent</th><th>Validité</th><th>Statut</th><th>Actions</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table></div>` : '<div class="empty"><div class="empty-icon">🎓</div><div class="empty-text">Aucune qualification</div></div>'}`;
+}
+
+function openAddQualif(personnelId, qualifId) {
+  const q = qualifId ? DB.qualifications.find(x=>x.id===qualifId) : null;
+  document.getElementById('modal-title').textContent = q ? 'Modifier la qualification' : 'Ajouter une qualification';
+  document.getElementById('modal-body').innerHTML = `
+  <div style="margin-bottom:16px">
+    <div class="scan-zone" onclick="document.getElementById('file-scan-qualif').click()">
+      <span class="scan-zone-icon">📷</span>
+      <p>Scanner / importer le document</p>
+      <p class="scan-hint">Diplôme, certificat médical, permis — L'IA lit les dates</p>
+      <span class="ai-badge">✨ Analyse IA incluse</span>
+    </div>
+    <input type="file" id="file-scan-qualif" accept="image/*,.pdf,.doc,.docx" style="display:none" onchange="handleFileScan(event,'qualif')">
+  </div>
+  <div class="form-grid">
+    <div class="field field-full"><label>Agent *</label><select id="q-personnel">
+      ${DB.personnel.map(p=>`<option value="${p.id}" ${(q?.personnelId||personnelId)===p.id?'selected':''}>${p.nom}</option>`).join('')}
+    </select></div>
+    <div class="field"><label>Type *</label><select id="q-type">
+      ${['Aptitude médicale','Diplôme','Permis / Habilitation','Formation','Autre'].map(t=>`<option value="${t}" ${q?.type===t?'selected':''}>${catIcon(t)} ${t}</option>`).join('')}
+    </select></div>
+    <div class="field"><label>Nom / Intitulé *</label><input id="q-nom" value="${q?.nom||''}" placeholder="Ex : Certificat médical plongée"></div>
+    <div class="field"><label>Date de fin de validité *</label><input type="date" id="q-date" value="${q?.dateValidite||''}"></div>
+    <div class="field"><label>Organisme / Autorité</label><input id="q-org" value="${q?.organisme||''}" placeholder="Ex : Médecine du travail, FFESSM..."></div>
+    <div class="field field-full"><label>Notes</label><textarea id="q-notes">${q?.notes||''}</textarea></div>
+  </div>`;
+  document.getElementById('modal-footer').innerHTML = `
+    <button class="btn btn-ghost" onclick="closeModal('modal-main')">Annuler</button>
+    <button class="btn btn-primary" onclick="saveQualif('${qualifId||''}')">💾 Enregistrer</button>`;
+  openModal('modal-main');
+}
+
+function saveQualif(id) {
+  const nom = document.getElementById('q-nom').value.trim();
+  const date = document.getElementById('q-date').value;
+  const personnelId = document.getElementById('q-personnel').value;
+  if (!nom || !date || !personnelId) { alert('Champs requis incomplets'); return; }
+  const data = { nom, type:document.getElementById('q-type').value, dateValidite:date, personnelId, organisme:document.getElementById('q-org').value.trim(), notes:document.getElementById('q-notes').value.trim() };
+  if (id) {
+    const idx = DB.qualifications.findIndex(x=>x.id===id);
+    if (idx>=0) DB.qualifications[idx] = {...DB.qualifications[idx],...data};
+  } else { DB.qualifications.push({id:uid(),...data}); }
+  save('qualifications');
+  const savedQual = id ? DB.qualifications.find(x=>x.id===id) : DB.qualifications[DB.qualifications.length-1];
+  syncUpsert('qualifications', savedQual);
+  closeModal('modal-main'); showPage(currentPage);
+}
+
+function deleteQualif(id, personnelId) {
+  if (!confirm('Supprimer cette qualification ?')) return;
+  DB.qualifications = DB.qualifications.filter(x=>x.id!==id);
+  save('qualifications');
+  syncDelete('qualifications', id);
+  closeModal('modal-detail');
+  if (personnelId) openDetailPersonnel(personnelId);
+  else showPage('diplomes');
+}
+
+// ============================================================
+// DOCUMENTS
+// ============================================================
+function renderDocuments() {
+  const docs = DB.documents;
+  const items = docs.map(d => `
+    <div class="doc-item" onclick="previewDoc('${d.id}')">
+      <span class="doc-icon">${d.type==='pdf'?'📕':d.type==='image'?'🖼️':d.type==='excel'?'📗':'📄'}</span>
+      <div style="flex:1">
+        <div class="doc-name">${d.nom}</div>
+        <div class="doc-size">${d.refNom||'Non lié'} · ${d.date||''}</div>
+      </div>
+      <button class="btn btn-danger btn-sm" onclick="event.stopPropagation();deleteDoc('${d.id}')">🗑</button>
+    </div>`).join('');
+
+  return `
+  <div class="page-header">
+    <div><div class="page-title">Documents scannés</div><div class="page-sub">${docs.length} document${docs.length>1?'s':''} stocké${docs.length>1?'s':''}</div></div>
+    <div class="header-actions">
+      <button class="btn btn-primary" onclick="openUploadDoc(null)">📎 Importer un document</button>
+    </div>
+  </div>
+  <div class="card" style="margin-bottom:16px;border:2px dashed var(--border2);background:transparent;cursor:pointer" onclick="document.getElementById('doc-upload-main').click()">
+    <div style="text-align:center;padding:20px">
+      <div style="font-size:32px;margin-bottom:8px">📂</div>
+      <div style="font-size:14px;color:var(--text2)">Glissez vos fichiers ici ou cliquez pour importer</div>
+      <div style="font-size:12px;color:var(--text3);margin-top:4px">Photo, PDF, Word (.docx), Excel (.xlsx)</div>
+    </div>
+    <input type="file" id="doc-upload-main" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" style="display:none" onchange="handleDocUpload(event,null)">
+  </div>
+  ${docs.length ? items : '<div class="empty"><div class="empty-icon">📁</div><div class="empty-text">Aucun document importé</div></div>'}`;
+}
+
+function handleDocUpload(event, refId) {
+  const files = event.target.files;
+  if (!files.length) return;
+  Array.from(files).forEach(file => {
+    const ext = file.name.split('.').pop().toLowerCase();
+    const type = ['jpg','jpeg','png','webp'].includes(ext)?'image':ext==='pdf'?'pdf':['xls','xlsx'].includes(ext)?'excel':'word';
+    const refItem = refId ? (DB.materiel.find(x=>x.id===refId)||DB.personnel.find(x=>x.id===refId)) : null;
+    const doc = { id:uid(), nom:file.name, type, refId:refId||null, refNom:refItem?.nom||null, date:new Date().toLocaleDateString('fr-FR'), size:file.size };
+    DB.documents.push(doc);
+
+    // If Excel/Word, try to parse
+    if (type==='excel') {
+      const reader = new FileReader();
+      reader.onload = e => {
+        try {
+          const wb = XLSX.read(e.target.result, {type:'array'});
+          const ws = wb.Sheets[wb.SheetNames[0]];
+          doc.excelData = XLSX.utils.sheet_to_json(ws, {header:1}).slice(0,20);
+          save('documents');
+        } catch(e) {}
+      };
+      reader.readAsArrayBuffer(file);
+    }
+  });
+  save('documents');
+  showPage('documents');
+}
+
+function openUploadDoc(refId) {
+  document.getElementById('modal-title').textContent = 'Importer un document';
+  document.getElementById('modal-body').innerHTML = `
+  <div class="scan-zone" onclick="document.getElementById('doc-upload-modal').click()">
+    <span class="scan-zone-icon">📂</span>
+    <p>Cliquez pour sélectionner un fichier</p>
+    <p class="scan-hint">Photo (JPG/PNG), PDF, Word (.docx), Excel (.xlsx)</p>
+  </div>
+  <input type="file" id="doc-upload-modal" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" style="display:none" onchange="handleDocUpload(event,'${refId||''}');closeModal('modal-main')">
+  ${DB.materiel.length ? `<div class="field" style="margin-top:12px"><label>Lier à un équipement (optionnel)</label><select id="doc-ref-select">
+    <option value="">— Non lié —</option>
+    ${DB.materiel.map(m=>`<option value="${m.id}" ${refId===m.id?'selected':''}>${m.nom}</option>`).join('')}
+  </select></div>` : ''}`;
+  document.getElementById('modal-footer').innerHTML = `<button class="btn btn-ghost" onclick="closeModal('modal-main')">Annuler</button>`;
+  openModal('modal-main');
+}
+
+function deleteDoc(id) {
+  if (!confirm('Supprimer ce document ?')) return;
+  DB.documents = DB.documents.filter(x=>x.id!==id);
+  save('documents'); showPage('documents');
+}
+
+function previewDoc(id) {
+  const d = DB.documents.find(x=>x.id===id);
+  if (!d) return;
+  document.getElementById('detail-title').textContent = d.nom;
+  document.getElementById('detail-body').innerHTML = `
+  <div class="card card-sm" style="margin-bottom:12px">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:13px">
+      <div><span style="color:var(--text3)">Type : </span>${d.type}</div>
+      <div><span style="color:var(--text3)">Date import : </span>${d.date}</div>
+      <div><span style="color:var(--text3)">Lié à : </span>${d.refNom||'—'}</div>
+    </div>
+  </div>
+  ${d.excelData ? `<div class="section-title">Aperçu du contenu Excel</div><div style="overflow:auto;max-height:300px;font-size:12px;font-family:var(--mono)"><table style="border-collapse:collapse;width:100%">${d.excelData.map(row=>`<tr>${row.map(cell=>`<td style="border:1px solid var(--border);padding:4px 8px;white-space:nowrap">${cell||''}</td>`).join('')}</tr>`).join('')}</table></div>` : `<div style="text-align:center;padding:30px;color:var(--text3)"><div style="font-size:48px">${d.type==='pdf'?'📕':d.type==='image'?'🖼️':'📄'}</div><div style="margin-top:8px">Aperçu non disponible</div></div>`}`;
+  document.getElementById('detail-footer').innerHTML = `<button class="btn btn-ghost" onclick="closeModal('modal-detail')">Fermer</button>`;
+  openModal('modal-detail');
+}
+
+// ============================================================
+// FILE SCAN + AI
+// ============================================================
+function handleFileScan(event, target) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const ext = file.name.split('.').pop().toLowerCase();
+
+  if (['xls','xlsx'].includes(ext)) {
+    const reader = new FileReader();
+    reader.onload = e => {
+      const wb = XLSX.read(e.target.result, {type:'array'});
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const data = XLSX.utils.sheet_to_json(ws, {header:1});
+      extractFromTableData(data, target);
+    };
+    reader.readAsArrayBuffer(file);
+    return;
+  }
+
+  // For image/PDF: use Claude API
+  const reader = new FileReader();
+  reader.onload = e => {
+    const base64 = e.target.result.split(',')[1];
+    const mediaType = file.type || 'image/jpeg';
+    analyzeWithClaude(base64, mediaType, target);
+  };
+  reader.readAsDataURL(file);
+}
+
+async function analyzeWithClaude(base64, mediaType, target) {
+  const apiKey = localStorage.getItem('qm_apikey') || '';
+  if (!apiKey) {
+    // Fallback: show manual hint
+    const resultEl = document.getElementById('scan-result-' + target);
+    if (resultEl) { resultEl.style.display='block'; resultEl.innerHTML='<span style="color:var(--amber2)">⚠️ Clé API non configurée — saisissez les informations manuellement. <button class="btn btn-ghost btn-sm" onclick="askApiKey()">Configurer</button></span>'; }
+    return;
+  }
+
+  const resultEl = document.getElementById('scan-result-' + target);
+  if (resultEl) { resultEl.style.display='block'; resultEl.innerHTML='<span class="ai-badge"><span class="spinner"></span> Analyse IA en cours...</span>'; }
+
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method:'POST',
+      headers:{'Content-Type':'application/json','x-api-key':apiKey,'anthropic-version':'2023-06-01'},
+      body:JSON.stringify({
+        model:'claude-sonnet-4-20250514', max_tokens:512,
+        messages:[{role:'user',content:[
+          {type:'image',source:{type:'base64',media_type:mediaType,data:base64}},
+          {type:'text',text:'Extrait de ce document les informations suivantes en JSON strict (sans markdown):\n{"nom":"désignation ou titre","date_validite":"YYYY-MM-DD","organisme":"","type":"","serie":""}\nSi une info est absente, mets null. Réponds UNIQUEMENT avec le JSON.'}
+        ]}]
+      })
+    });
+    const data = await res.json();
+    const text = data.content?.[0]?.text||'';
+    const parsed = JSON.parse(text.replace(/```json|```/g,'').trim());
+    if (parsed.nom && document.getElementById(target==='mat'?'mat-nom':'q-nom')) document.getElementById(target==='mat'?'mat-nom':'q-nom').value = parsed.nom;
+    if (parsed.date_validite) document.getElementById(target==='mat'?'mat-date':'q-date').value = parsed.date_validite;
+    if (parsed.organisme && document.getElementById(target==='mat'?'mat-org':'q-org')) document.getElementById(target==='mat'?'mat-org':'q-org').value = parsed.organisme || '';
+    if (parsed.serie && document.getElementById('mat-ref')) document.getElementById('mat-ref').value = parsed.serie||'';
+    if (resultEl) resultEl.innerHTML = '<span class="ai-badge">✅ Document analysé — vérifiez les champs</span>';
+  } catch(e) {
+    if (resultEl) resultEl.innerHTML = '<span style="color:var(--red2);font-size:12px">❌ Analyse impossible — saisissez manuellement</span>';
+  }
+}
+
+function extractFromTableData(data, target) {
+  // Try to find date and name from Excel rows
+  let nom='', date='', org='';
+  data.forEach(row => {
+    row.forEach((cell, i) => {
+      const s = String(cell||'').toLowerCase();
+      if (s.includes('désignation')||s.includes('matériel')||s.includes('equipement')) { nom = String(row[i+1]||nom); }
+      if (s.includes('validité')||s.includes('echéance')||s.includes('expiration')) {
+        const v = row[i+1];
+        if (v instanceof Date) date = v.toISOString().split('T')[0];
+        else if (typeof v === 'number') { const d = new Date((v-25569)*86400000); date = d.toISOString().split('T')[0]; }
+        else if (typeof v === 'string' && v.match(/\d{2}\/\d{2}\/\d{4}/)) { const [dd,mm,yyyy]=v.split('/'); date=`${yyyy}-${mm}-${dd}`; }
+      }
+      if (s.includes('organisme')||s.includes('bureau')) org = String(row[i+1]||org);
+    });
+  });
+  if (nom && document.getElementById(target==='mat'?'mat-nom':'q-nom')) document.getElementById(target==='mat'?'mat-nom':'q-nom').value = nom;
+  if (date) document.getElementById(target==='mat'?'mat-date':'q-date').value = date;
+  if (org && document.getElementById(target==='mat'?'mat-org':'q-org')) document.getElementById(target==='mat'?'mat-org':'q-org').value = org;
+}
+
+function askApiKey() {
+  const key = prompt('Entrez votre clé API Anthropic (commence par sk-ant-...):\n\nObtenez-la sur https://console.anthropic.com');
+  if (key) { localStorage.setItem('qm_apikey', key); alert('Clé enregistrée ✅'); }
+}
+
+// ============================================================
+// STATS
+// ============================================================
+function renderStats() {
+  const allItems = [...DB.materiel,...DB.qualifications];
+  const expired = allItems.filter(x=>getStatus(x.dateValidite).status==='expired');
+  const soon = allItems.filter(x=>getStatus(x.dateValidite).status==='soon');
+  const ok = allItems.filter(x=>getStatus(x.dateValidite).status==='ok');
+  const conf = allItems.length ? Math.round(((ok.length+soon.length)/allItems.length)*100) : 100;
+
+  const cats = ['Bouteille','Plongée','EPI','Véhicule','Engin'];
+  const catBars = cats.map(cat => {
+    const items = DB.materiel.filter(m=>m.categorie===cat);
+    if (!items.length) return '';
+    const expd = items.filter(m=>getStatus(m.dateValidite).status==='expired').length;
+    const sn = items.filter(m=>getStatus(m.dateValidite).status==='soon').length;
+    const ok2 = items.filter(m=>getStatus(m.dateValidite).status==='ok').length;
+    return `<div style="margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:6px">
+        <span>${catIcon(cat)} ${cat} <span style="color:var(--text3)">(${items.length})</span></span>
+        <span style="display:flex;gap:6px">
+          ${expd?`<span class="badge badge-red">${expd} exp.</span>`:''}
+          ${sn?`<span class="badge badge-amber">${sn} bientôt</span>`:''}
+          <span class="badge badge-green">${ok2} ok</span>
+        </span>
+      </div>
+      <div class="progress-bar" style="height:8px">
+        <div class="progress-fill" style="width:${Math.round((ok2/items.length)*100)}%;background:var(--green)"></div>
+      </div>
+    </div>`;
+  }).join('');
+
+  const personnelStats = DB.personnel.map(p => {
+    const qualifs = DB.qualifications.filter(q=>q.personnelId===p.id);
+    const exp = qualifs.filter(q=>getStatus(q.dateValidite).status==='expired').length;
+    const sn = qualifs.filter(q=>getStatus(q.dateValidite).status==='soon').length;
+    return `<tr>
+      <td><div style="display:flex;align-items:center;gap:8px"><div class="person-avatar" style="background:${p.color||'var(--blue)'};width:28px;height:28px;font-size:11px">${p.nom.split(' ').map(x=>x[0]).join('').slice(0,2).toUpperCase()}</div><div><div class="td-name">${p.nom}</div><div class="td-sub">${p.poste||''}</div></div></div></td>
+      <td>${qualifs.length}</td>
+      <td>${exp?`<span class="badge badge-red">${exp}</span>`:'<span class="badge badge-green">0</span>'}</td>
+      <td>${sn?`<span class="badge badge-amber">${sn}</span>`:'<span class="badge badge-green">0</span>'}</td>
+    </tr>`;
+  }).join('');
+
+  return `
+  <div class="page-title" style="margin-bottom:24px">Statistiques globales</div>
+  <div class="stats-grid" style="margin-bottom:28px">
+    <div class="stat-card blue"><span class="stat-icon">📋</span><div class="stat-num blue">${allItems.length}</div><div class="stat-label">Entrées totales</div></div>
+    <div class="stat-card red"><span class="stat-icon">🚨</span><div class="stat-num red">${expired.length}</div><div class="stat-label">Expirées</div></div>
+    <div class="stat-card amber"><span class="stat-icon">⏳</span><div class="stat-num amber">${soon.length}</div><div class="stat-label">Expirent bientôt</div></div>
+    <div class="stat-card green"><span class="stat-icon">✅</span><div class="stat-num green">${conf}%</div><div class="stat-label">Taux de conformité</div></div>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start">
+    <div>
+      <div class="section-title">Matériel par catégorie</div>
+      <div class="card">${catBars||'<div style="color:var(--text3)">Aucune donnée</div>'}</div>
+    </div>
+    <div>
+      <div class="section-title">État par agent</div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Agent</th><th>Qualif.</th><th>Expirées</th><th>Bientôt</th></tr></thead>
+        <tbody>${personnelStats||'<tr><td colspan="4" style="color:var(--text3);text-align:center">Aucun agent</td></tr>'}</tbody>
+      </table></div>
+    </div>
+  </div>
+  <div style="margin-top:20px">
+    <div class="section-title">📤 Exports</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <button class="btn btn-ghost" onclick="exportExcel('materiel')">📗 Export Matériel Excel</button>
+      <button class="btn btn-ghost" onclick="exportExcel('qualifications')">📗 Export Qualifications Excel</button>
+      <button class="btn btn-ghost" onclick="exportExcel('all')">📗 Export Complet Excel</button>
+    </div>
+  </div>`;
+}
+
+// ============================================================
+// EXPORT EXCEL
+// ============================================================
+function exportExcel(type) {
+  const wb = XLSX.utils.book_new();
+  if (type==='materiel'||type==='all') {
+    const rows = DB.materiel.map(m => ({
+      Nom:m.nom, Référence:m.ref, Catégorie:m.categorie, 'Sous-type':m.souscat,
+      'Date validité':fmtDate(m.dateValidite), Statut:getStatus(m.dateValidite).label, Organisme:m.organisme, Notes:m.notes
+    }));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Matériel');
+  }
+  if (type==='qualifications'||type==='all') {
+    const rows = DB.qualifications.map(q => {
+      const p = DB.personnel.find(x=>x.id===q.personnelId);
+      return { Agent:p?.nom||'—', Poste:p?.poste||'—', 'Qualification/Diplôme':q.nom, Type:q.type, 'Date validité':fmtDate(q.dateValidite), Statut:getStatus(q.dateValidite).label, Organisme:q.organisme };
+    });
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Qualifications');
+  }
+  if (type==='personnel') {
+    const rows = DB.personnel.map(p => ({
+      Nom:p.nom, Poste:p.poste, Service:p.service,
+      'Nb qualifications':DB.qualifications.filter(q=>q.personnelId===p.id).length,
+      'Expirées':DB.qualifications.filter(q=>q.personnelId===p.id&&getStatus(q.dateValidite).status==='expired').length,
+    }));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Personnel');
+  }
+  XLSX.writeFile(wb, `QualifManager_export_${new Date().toLocaleDateString('fr-FR').replace(/\//g,'-')}.xlsx`);
+}
+
+// ============================================================
+// SEARCH
+// ============================================================
+function globalSearch(q) {
+  if (!q.trim()) return;
+  const lq = q.toLowerCase();
+  const matResults = DB.materiel.filter(m=>m.nom.toLowerCase().includes(lq)||m.ref?.toLowerCase().includes(lq));
+  const qualifResults = DB.qualifications.filter(x=>x.nom.toLowerCase().includes(lq));
+  const persResults = DB.personnel.filter(p=>p.nom.toLowerCase().includes(lq));
+  if (matResults.length+qualifResults.length+persResults.length===0) return;
+  // Navigate to most relevant
+  if (matResults.length) showPage('materiel');
+  else if (persResults.length) showPage('personnel');
+  else showPage('diplomes');
+}
+
+// ============================================================
+// MODAL HELPERS
+// ============================================================
+function openModal(id) { document.getElementById(id).classList.add('open'); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+document.getElementById('modal-main').addEventListener('click', e => { if(e.target===document.getElementById('modal-main')) closeModal('modal-main'); });
+document.getElementById('modal-detail').addEventListener('click', e => { if(e.target===document.getElementById('modal-detail')) closeModal('modal-detail'); });
+
+// ============================================================
+// SETTINGS INIT
+// ============================================================
+document.getElementById('user-name-display').textContent = DB.settings.userName;
+document.getElementById('user-role-display').textContent = DB.settings.userRole;
+document.getElementById('user-avatar').textContent = DB.settings.userInitials || DB.settings.userName[0].toUpperCase();
+
+// ============================================================
+// INIT
+// ============================================================
+async function initApp() {
+  if (!sb) {
+    // Pas de Supabase configuré -> mode local uniquement, on saute l'écran de login
+    document.getElementById('auth-screen').style.display = 'none';
+    document.getElementById('app').style.display = '';
+    generateNotifications();
+    updateBadges();
+    showPage('dashboard');
+    return;
+  }
+  const { data: { session } } = await sb.auth.getSession();
+  if (session && session.user) {
+    await onAuthReady(session.user);
+  } else {
+    document.getElementById('auth-screen').style.display = 'flex';
+    document.getElementById('app').style.display = 'none';
+  }
+  sb.auth.onAuthStateChange((event, session) => {
+    if (event === 'SIGNED_OUT') {
+      document.getElementById('auth-screen').style.display = 'flex';
+      document.getElementById('app').style.display = 'none';
+    }
+  });
+}
+initApp();
+</script>
+</body>
+</html>
