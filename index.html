@@ -1431,7 +1431,9 @@ function handleFileScan(event, target) {
   const reader = new FileReader();
   reader.onload = e => {
     const base64 = e.target.result.split(',')[1];
-    const mediaType = file.type || 'image/jpeg';
+    // Safari peut retourner '' pour file.type sur les PDF → détecter via extension aussi
+    const isPdfByExt = ext === 'pdf';
+    const mediaType = isPdfByExt ? 'application/pdf' : (file.type || 'image/jpeg');
     analyzeWithClaude(base64, mediaType, target);
   };
   reader.readAsDataURL(file);
