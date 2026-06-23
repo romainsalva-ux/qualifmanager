@@ -1379,13 +1379,13 @@ function previewDoc(id) {
     } else if (d.type === 'pdf') {
       previewHtml = `
         <div style="margin-bottom:12px">
-          <iframe src="${d.dataUrl}" style="width:100%;height:420px;border:1px solid var(--border);border-radius:8px"></iframe>
+          <embed src="${d.dataUrl}" type="application/pdf" style="width:100%;height:420px;border:1px solid var(--border);border-radius:8px"></embed>
         </div>
         <div style="text-align:center;margin-bottom:12px">
-          <a href="${d.dataUrl}" download="${d.nom}" style="color:var(--blue2);font-size:13px;text-decoration:none">⬇️ Télécharger le PDF</a>
+          <a href="${d.dataUrl}" download="${d.nom}" class="btn btn-primary" style="text-decoration:none">⬇️ Télécharger le PDF</a>
         </div>`;
     } else {
-      previewHtml = `<div style="text-align:center;padding:20px"><a href="${d.dataUrl}" download="${d.nom}" class="btn btn-primary">⬇️ Télécharger ${d.nom}</a></div>`;
+      previewHtml = `<div style="text-align:center;padding:20px"><a href="${d.dataUrl}" download="${d.nom}" class="btn btn-primary" style="text-decoration:none">⬇️ Télécharger ${d.nom}</a></div>`;
     }
   } else if (d.excelData) {
     previewHtml = `<div class="section-title">Aperçu du contenu Excel</div><div style="overflow:auto;max-height:300px;font-size:12px;font-family:var(--mono)"><table style="border-collapse:collapse;width:100%">${d.excelData.map(row=>`<tr>${row.map(cell=>`<td style="border:1px solid var(--border);padding:4px 8px;white-space:nowrap">${cell||''}</td>`).join('')}</tr>`).join('')}</table></div>`;
@@ -1441,7 +1441,10 @@ async function analyzeWithClaude(base64, mediaType, target) {
   const apiKey = localStorage.getItem('qm_apikey') || '';
   if (!apiKey) {
     const resultEl = document.getElementById('scan-result-' + target);
-    if (resultEl) { resultEl.style.display='block'; resultEl.innerHTML='<span style="color:var(--amber2)">⚠️ Clé API non configurée — saisissez les informations manuellement. <button class="btn btn-ghost btn-sm" onclick="askApiKey()">Configurer</button></span>'; }
+    if (resultEl) {
+      resultEl.style.display='block';
+      resultEl.innerHTML='<span style="color:var(--amber2)">⚠️ Clé API non configurée. <button class="btn btn-primary btn-sm" onclick="showPage(\'alertes\')">⚙️ Configurer maintenant</button></span>';
+    }
     return;
   }
 
