@@ -509,22 +509,26 @@ async function onAuthReady(user) {
 async function pullAllFromSupabase() {
   if (!sb || !currentUser) return;
   try {
-    const [matRes, persRes, qualRes] = await Promise.all([
+    const [matRes, persRes, qualRes, docRes] = await Promise.all([
       sb.from('equipements').select('*').eq('user_id', currentUser.id),
       sb.from('personnel').select('*').eq('user_id', currentUser.id),
       sb.from('qualifications').select('*').eq('user_id', currentUser.id),
+      sb.from('documents').select('*').eq('user_id', currentUser.id),
     ]);
     if (matRes.error) throw matRes.error;
     if (persRes.error) throw persRes.error;
     if (qualRes.error) throw qualRes.error;
+    if (docRes.error) throw docRes.error;
 
     DB.materiel = (matRes.data || []).map(r => ({ ...r.data, id: r.id }));
     DB.personnel = (persRes.data || []).map(r => ({ ...r.data, id: r.id }));
     DB.qualifications = (qualRes.data || []).map(r => ({ ...r.data, id: r.id }));
+    DB.documents = (docRes.data || []).map(r => ({ ...r.data, id: r.id }));
 
     localStorage.setItem('qm_materiel', JSON.stringify(DB.materiel));
     localStorage.setItem('qm_personnel', JSON.stringify(DB.personnel));
     localStorage.setItem('qm_qualifications', JSON.stringify(DB.qualifications));
+    localStorage.setItem('qm_documents', JSON.stringify(DB.documents));
   } catch (err) {
     console.error('Erreur pull Supabase:', err);
     setSyncStatus('offline');
@@ -532,7 +536,7 @@ async function pullAllFromSupabase() {
 }
 
 // Table Supabase correspondant à chaque clé DB locale
-const TABLE_MAP = { materiel: 'equipements', personnel: 'personnel', qualifications: 'qualifications' };
+const TABLE_MAP = { materiel: 'equipements', personnel: 'personnel', qualifications: 'qualifications', documents: 'documents' };
 
 // Upsert un item unique vers Supabase (appelé après chaque ajout/édition)
 async function syncUpsert(key, item) {
@@ -1278,7 +1282,19 @@ function handleDocUpload(event, refId) {
     const doc = { id:uid(), nom:file.name, type, refId:refId||null, refNom:refItem?.nom||null, date:new Date().toLocaleDateString('fr-FR'), size:file.size };
     DB.documents.push(doc);
 
-    // If Excel/Word, try to parse
+    // Toujours lire le fichier en base64 pour le conserver (aperçu, IA, sync)
+    const fileReader = new FileReader();
+    fileReader.onload = e => {
+      doc.dataUrl = e.target.result; // data:<mime>;base64,xxxx
+      save('documents');
+      syncUpsert('documents', doc);
+    };
+    fileReader.onerror = () => {
+      save('documents');
+    };
+    fileReader.readAsDataURL(file);
+
+    // If Excel, also parse a table preview
     if (type==='excel') {
       const reader = new FileReader();
       reader.onload = e => {
@@ -1287,6 +1303,7 @@ function handleDocUpload(event, refId) {
           const ws = wb.Sheets[wb.SheetNames[0]];
           doc.excelData = XLSX.utils.sheet_to_json(ws, {header:1}).slice(0,20);
           save('documents');
+          syncUpsert('documents', doc);
         } catch(e) {}
       };
       reader.readAsArrayBuffer(file);
@@ -1316,22 +1333,47 @@ function openUploadDoc(refId) {
 function deleteDoc(id) {
   if (!confirm('Supprimer ce document ?')) return;
   DB.documents = DB.documents.filter(x=>x.id!==id);
-  save('documents'); showPage('documents');
+  save('documents');
+  syncDelete('documents', id);
+  showPage('documents');
 }
 
 function previewDoc(id) {
   const d = DB.documents.find(x=>x.id===id);
   if (!d) return;
   document.getElementById('detail-title').textContent = d.nom;
+
+  let previewHtml = '';
+  if (d.dataUrl) {
+    if (d.type === 'image') {
+      previewHtml = `<div style="text-align:center;margin-bottom:12px"><img src="${d.dataUrl}" style="max-width:100%;max-height:400px;border-radius:8px;border:1px solid var(--border)"></div>`;
+    } else if (d.type === 'pdf') {
+      previewHtml = `
+        <div style="margin-bottom:12px">
+          <iframe src="${d.dataUrl}" style="width:100%;height:420px;border:1px solid var(--border);border-radius:8px"></iframe>
+        </div>
+        <div style="text-align:center;margin-bottom:12px">
+          <a href="${d.dataUrl}" download="${d.nom}" style="color:var(--blue2);font-size:13px;text-decoration:none">⬇️ Télécharger le PDF</a>
+        </div>`;
+    } else {
+      previewHtml = `<div style="text-align:center;padding:20px"><a href="${d.dataUrl}" download="${d.nom}" class="btn btn-primary">⬇️ Télécharger ${d.nom}</a></div>`;
+    }
+  } else if (d.excelData) {
+    previewHtml = `<div class="section-title">Aperçu du contenu Excel</div><div style="overflow:auto;max-height:300px;font-size:12px;font-family:var(--mono)"><table style="border-collapse:collapse;width:100%">${d.excelData.map(row=>`<tr>${row.map(cell=>`<td style="border:1px solid var(--border);padding:4px 8px;white-space:nowrap">${cell||''}</td>`).join('')}</tr>`).join('')}</table></div>`;
+  } else {
+    previewHtml = `<div style="text-align:center;padding:30px;color:var(--text3)"><div style="font-size:48px">${d.type==='pdf'?'📕':d.type==='image'?'🖼️':'📄'}</div><div style="margin-top:8px">Aperçu non disponible (fichier non stocké)</div></div>`;
+  }
+
   document.getElementById('detail-body').innerHTML = `
   <div class="card card-sm" style="margin-bottom:12px">
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:13px">
       <div><span style="color:var(--text3)">Type : </span>${d.type}</div>
       <div><span style="color:var(--text3)">Date import : </span>${d.date}</div>
       <div><span style="color:var(--text3)">Lié à : </span>${d.refNom||'—'}</div>
+      <div><span style="color:var(--text3)">Taille : </span>${d.size ? Math.round(d.size/1024)+'Ko' : '—'}</div>
     </div>
   </div>
-  ${d.excelData ? `<div class="section-title">Aperçu du contenu Excel</div><div style="overflow:auto;max-height:300px;font-size:12px;font-family:var(--mono)"><table style="border-collapse:collapse;width:100%">${d.excelData.map(row=>`<tr>${row.map(cell=>`<td style="border:1px solid var(--border);padding:4px 8px;white-space:nowrap">${cell||''}</td>`).join('')}</tr>`).join('')}</table></div>` : `<div style="text-align:center;padding:30px;color:var(--text3)"><div style="font-size:48px">${d.type==='pdf'?'📕':d.type==='image'?'🖼️':'📄'}</div><div style="margin-top:8px">Aperçu non disponible</div></div>`}`;
+  ${previewHtml}`;
   document.getElementById('detail-footer').innerHTML = `<button class="btn btn-ghost" onclick="closeModal('modal-detail')">Fermer</button>`;
   openModal('modal-detail');
 }
@@ -1369,7 +1411,6 @@ function handleFileScan(event, target) {
 async function analyzeWithClaude(base64, mediaType, target) {
   const apiKey = localStorage.getItem('qm_apikey') || '';
   if (!apiKey) {
-    // Fallback: show manual hint
     const resultEl = document.getElementById('scan-result-' + target);
     if (resultEl) { resultEl.style.display='block'; resultEl.innerHTML='<span style="color:var(--amber2)">⚠️ Clé API non configurée — saisissez les informations manuellement. <button class="btn btn-ghost btn-sm" onclick="askApiKey()">Configurer</button></span>'; }
     return;
@@ -1378,28 +1419,40 @@ async function analyzeWithClaude(base64, mediaType, target) {
   const resultEl = document.getElementById('scan-result-' + target);
   if (resultEl) { resultEl.style.display='block'; resultEl.innerHTML='<span class="ai-badge"><span class="spinner"></span> Analyse IA en cours...</span>'; }
 
+  // PDF → type 'document', image → type 'image'
+  const isPdf = mediaType === 'application/pdf';
+  const contentBlock = isPdf
+    ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64 } }
+    : { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } };
+
   try {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method:'POST',
-      headers:{'Content-Type':'application/json','x-api-key':apiKey,'anthropic-version':'2023-06-01'},
-      body:JSON.stringify({
-        model:'claude-sonnet-4-20250514', max_tokens:512,
-        messages:[{role:'user',content:[
-          {type:'image',source:{type:'base64',media_type:mediaType,data:base64}},
-          {type:'text',text:'Extrait de ce document les informations suivantes en JSON strict (sans markdown):\n{"nom":"désignation ou titre","date_validite":"YYYY-MM-DD","organisme":"","type":"","serie":""}\nSi une info est absente, mets null. Réponds UNIQUEMENT avec le JSON.'}
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6', max_tokens: 512,
+        messages: [{ role: 'user', content: [
+          contentBlock,
+          { type: 'text', text: 'Extrait de ce document les informations suivantes en JSON strict (sans markdown):\n{"nom":"désignation ou titre","date_validite":"YYYY-MM-DD","organisme":"","type":"","serie":""}\nSi une info est absente, mets null. Réponds UNIQUEMENT avec le JSON.' }
         ]}]
       })
     });
     const data = await res.json();
-    const text = data.content?.[0]?.text||'';
+    if (data.error) throw new Error(data.error.message);
+    const text = data.content?.[0]?.text || '';
     const parsed = JSON.parse(text.replace(/```json|```/g,'').trim());
     if (parsed.nom && document.getElementById(target==='mat'?'mat-nom':'q-nom')) document.getElementById(target==='mat'?'mat-nom':'q-nom').value = parsed.nom;
     if (parsed.date_validite) document.getElementById(target==='mat'?'mat-date':'q-date').value = parsed.date_validite;
     if (parsed.organisme && document.getElementById(target==='mat'?'mat-org':'q-org')) document.getElementById(target==='mat'?'mat-org':'q-org').value = parsed.organisme || '';
-    if (parsed.serie && document.getElementById('mat-ref')) document.getElementById('mat-ref').value = parsed.serie||'';
+    if (parsed.serie && document.getElementById('mat-ref')) document.getElementById('mat-ref').value = parsed.serie || '';
     if (resultEl) resultEl.innerHTML = '<span class="ai-badge">✅ Document analysé — vérifiez les champs</span>';
   } catch(e) {
-    if (resultEl) resultEl.innerHTML = '<span style="color:var(--red2);font-size:12px">❌ Analyse impossible — saisissez manuellement</span>';
+    if (resultEl) resultEl.innerHTML = `<span style="color:var(--red2);font-size:12px">❌ ${e.message || 'Analyse impossible — saisissez manuellement'}</span>`;
   }
 }
 
