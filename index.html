@@ -568,6 +568,11 @@ async function onAuthReady(user) {
   document.getElementById('app').style.display = '';
   setSyncStatus('syncing');
   await pullAllFromSupabase();
+  // Charger la clé API partagée depuis Supabase
+  if (sb) {
+    const { data } = await sb.from('app_settings').select('value').eq('key', 'anthropic_api_key').eq('org_id', 'bonna-tp').single();
+    if (data?.value) localStorage.setItem('qm_apikey', data.value);
+  }
   subscribeRealtime();
   setSyncStatus('online');
   generateNotifications();
@@ -983,19 +988,27 @@ function saveAlertDays() {
   if (v>0) { DB.settings.alertDays = v; save('settings'); showPage('alertes'); }
 }
 
-function saveApiKey() {
+async function saveApiKey() {
   const key = document.getElementById('apikey-input').value.trim();
   if (!key) { alert('Entrez une clé API valide (sk-ant-...)'); return; }
   if (!key.startsWith('sk-ant-')) { alert('La clé doit commencer par sk-ant-...'); return; }
+  // Stocker en localStorage pour usage immédiat
   localStorage.setItem('qm_apikey', key);
-  document.getElementById('apikey-status').style.display = 'block';
-  document.getElementById('apikey-status').textContent = '✅ Clé API enregistrée — l\'analyse IA est active';
+  // Stocker dans Supabase pour partage entre tous les utilisateurs
+  if (sb) {
+    await sb.from('app_settings').upsert({ key: 'anthropic_api_key', value: key, org_id: 'bonna-tp' });
+  }
+  const statusEl = document.getElementById('apikey-status');
+  if (statusEl) { statusEl.style.display = 'block'; statusEl.textContent = '✅ Clé API enregistrée — l\'analyse IA est active pour tous les utilisateurs'; }
   showPage('alertes');
 }
 
-function deleteApiKey() {
+async function deleteApiKey() {
   if (!confirm('Supprimer la clé API ? L\'analyse IA ne sera plus disponible.')) return;
   localStorage.removeItem('qm_apikey');
+  if (sb) {
+    await sb.from('app_settings').delete().eq('key', 'anthropic_api_key').eq('org_id', 'bonna-tp');
+  }
   showPage('alertes');
 }
 
