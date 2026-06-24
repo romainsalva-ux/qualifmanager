@@ -1176,12 +1176,57 @@ function openDetailMateriel(id) {
     ${m.notes?`<div class="card card-sm" style="grid-column:1/-1"><div style="font-size:11px;color:var(--text3);margin-bottom:4px">Notes</div><div style="font-size:13px;color:var(--text2)">${m.notes}</div></div>`:''}
   </div>
   <div class="section-title">📁 Documents liés (${docs.length})</div>
-  ${docs.length ? docs.map(d=>`<div class="doc-item"><span class="doc-icon">📄</span><span class="doc-name">${d.nom}</span><span class="doc-size">${d.date||''}</span></div>`).join('') : '<div style="color:var(--text3);font-size:13px">Aucun document lié</div>'}
-  <button class="btn btn-ghost btn-sm" style="margin-top:10px" onclick="openUploadDoc('${id}')">📎 Attacher un document</button>`;
+  ${docs.length ? docs.map(d=>{
+    const fileUrl = d.url || d.dataUrl || null;
+    return `<div class="doc-item" onclick="${fileUrl ? `openDocFromQualif('${d.id}')` : ''}" style="cursor:${fileUrl?'pointer':'default'}">
+      <span class="doc-icon">${d.type==='pdf'?'📕':d.type==='image'?'🖼️':'📄'}</span>
+      <span class="doc-name">${d.nom}</span>
+      <span class="doc-size">${d.date||''}</span>
+      ${fileUrl ? `<span style="color:var(--blue2);font-size:11px">👁 Ouvrir</span>` : ''}
+    </div>`;
+  }).join('') : '<div style="color:var(--text3);font-size:13px">Aucun document lié</div>'}
+  <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+    <button class="btn btn-ghost btn-sm" onclick="openUploadDoc('${id}')">📎 Importer un nouveau</button>
+    ${DB.documents.filter(d=>d.refId!==id).length ? `<button class="btn btn-ghost btn-sm" onclick="pickExistingDocForMateriel('${id}')">🔗 Lier un document existant</button>` : ''}
+  </div>`;
   document.getElementById('detail-footer').innerHTML = `
     <button class="btn btn-ghost" onclick="closeModal('modal-detail')">Fermer</button>
     <button class="btn btn-primary" onclick="closeModal('modal-detail');openEditMateriel('${id}')">✏️ Modifier</button>`;
   openModal('modal-detail');
+}
+
+function pickExistingDocForMateriel(materielId) {
+  const available = DB.documents.filter(d => d.refId !== materielId);
+  if (!available.length) { alert('Aucun autre document disponible'); return; }
+  document.getElementById('modal-title').textContent = 'Lier un document existant';
+  document.getElementById('modal-body').innerHTML = `
+    <div style="font-size:13px;color:var(--text2);margin-bottom:12px">Choisissez un document à lier à cet équipement :</div>
+    <div style="display:flex;flex-direction:column;gap:8px;max-height:300px;overflow-y:auto">
+      ${available.map(d=>`
+        <div onclick="linkExistingDocToMateriel('${materielId}','${d.id}')"
+          style="display:flex;align-items:center;gap:10px;padding:10px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;cursor:pointer"
+          onmouseover="this.style.borderColor='var(--blue2)'" onmouseout="this.style.borderColor='var(--border)'">
+          <span style="font-size:20px">${d.type==='pdf'?'📕':d.type==='image'?'🖼️':'📄'}</span>
+          <div>
+            <div style="font-size:13px;font-weight:500">${d.nom}</div>
+            <div style="font-size:11px;color:var(--text3)">${d.refNom||'Non lié'} · ${d.date||''}</div>
+          </div>
+        </div>`).join('')}
+    </div>`;
+  document.getElementById('modal-footer').innerHTML = `<button class="btn btn-ghost" onclick="closeModal('modal-main')">Annuler</button>`;
+  openModal('modal-main');
+}
+
+function linkExistingDocToMateriel(materielId, docId) {
+  const doc = DB.documents.find(d=>d.id===docId);
+  const m = DB.materiel.find(x=>x.id===materielId);
+  if (!doc || !m) return;
+  doc.refId = materielId;
+  doc.refNom = m.nom;
+  save('documents');
+  syncUpsert('documents', doc);
+  closeModal('modal-main');
+  openDetailMateriel(materielId);
 }
 
 // ============================================================
@@ -1265,11 +1310,11 @@ function openDetailPersonnel(id) {
   if (!p) return;
   const qualifs = DB.qualifications.filter(q=>q.personnelId===id);
   const qRows = qualifs.map(q=>{
-    const linkedDoc = DB.documents.find(d=>d.refId===q.id || (d.refId===id && d.nom.toLowerCase().includes(q.nom.toLowerCase().slice(0,8))));
+    const linkedDoc = q.docId ? DB.documents.find(d=>d.id===q.docId) : null;
     const docUrl = linkedDoc?.url || linkedDoc?.dataUrl || null;
     const typeCell = docUrl
       ? `<span class="cat-chip" onclick="event.stopPropagation();openDocFromQualif('${linkedDoc.id}')" style="cursor:pointer;border:1px solid var(--blue2)" title="Cliquer pour ouvrir le document">${catIcon(q.type)} ${q.type} 📎</span>`
-      : `<span class="cat-chip">${catIcon(q.type)} ${q.type}</span>`;
+      : `<span class="cat-chip" onclick="event.stopPropagation();attachDocToQualif('${q.id}','${id}')" style="cursor:pointer;opacity:0.7;border:1px dashed var(--border2)" title="Cliquer pour attacher un document">${catIcon(q.type)} ${q.type} ＋</span>`;
     return `
     <tr>
       <td><div class="td-name">${q.nom}</div></td>
@@ -1323,11 +1368,11 @@ function renderDiplomes() {
   const types = ['Tous','Aptitude médicale','Diplôme','Permis / Habilitation','Formation'];
   const rows = DB.qualifications.map(q => {
     const p = DB.personnel.find(x=>x.id===q.personnelId);
-    const linkedDoc = DB.documents.find(d=>d.refId===q.id || (d.refId===q.personnelId && d.nom.toLowerCase().includes(q.nom.toLowerCase().slice(0,8))));
+    const linkedDoc = q.docId ? DB.documents.find(d=>d.id===q.docId) : null;
     const docUrl = linkedDoc?.url || linkedDoc?.dataUrl || null;
     const typeCell = docUrl
       ? `<span class="cat-chip" onclick="event.stopPropagation();openDocFromQualif('${linkedDoc.id}')" style="cursor:pointer;border:1px solid var(--blue2)" title="Cliquer pour ouvrir le document">${catIcon(q.type)} ${q.type} 📎</span>`
-      : `<span class="cat-chip">${catIcon(q.type)} ${q.type}</span>`;
+      : `<span class="cat-chip" onclick="event.stopPropagation();attachDocToQualif('${q.id}',null)" style="cursor:pointer;opacity:0.7;border:1px dashed var(--border2)" title="Cliquer pour attacher un document">${catIcon(q.type)} ${q.type} ＋</span>`;
     return `<tr>
       <td><div class="td-name">${q.nom}</div><div class="td-sub">${q.organisme||''}</div></td>
       <td>${typeCell}</td>
@@ -1532,6 +1577,77 @@ function openUploadDoc(refId) {
   </div>`;
   document.getElementById('modal-footer').innerHTML = `<button class="btn btn-ghost" onclick="closeModal('modal-main')">Annuler</button>`;
   openModal('modal-main');
+}
+
+function attachDocToQualif(qualifId, personnelId) {
+  const q = DB.qualifications.find(x=>x.id===qualifId);
+  if (!q) return;
+  const existingDocs = DB.documents.filter(d => !d.refId || d.refId === q.personnelId);
+
+  document.getElementById('modal-title').textContent = 'Attacher un document à : ' + q.nom;
+  document.getElementById('modal-body').innerHTML = `
+    ${existingDocs.length ? `
+    <div class="field" style="margin-bottom:16px">
+      <label>Choisir un document existant</label>
+      <div style="display:flex;flex-direction:column;gap:8px;max-height:200px;overflow-y:auto">
+        ${existingDocs.map(d=>`
+          <div onclick="linkDocToQualif('${qualifId}','${d.id}','${personnelId||''}')"
+            style="display:flex;align-items:center;gap:10px;padding:10px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;cursor:pointer"
+            onmouseover="this.style.borderColor='var(--blue2)'" onmouseout="this.style.borderColor='var(--border)'">
+            <span style="font-size:20px">${d.type==='pdf'?'📕':d.type==='image'?'🖼️':'📄'}</span>
+            <div><div style="font-size:13px;font-weight:500">${d.nom}</div><div style="font-size:11px;color:var(--text3)">${d.date||''}</div></div>
+          </div>`).join('')}
+      </div>
+    </div>
+    <div style="text-align:center;color:var(--text3);font-size:12px;margin:8px 0">— ou —</div>` : ''}
+    <div class="scan-zone" onclick="document.getElementById('attach-doc-upload').click()">
+      <span class="scan-zone-icon">📂</span>
+      <p>Importer un nouveau document</p>
+      <p class="scan-hint">Photo, PDF, Word, Excel</p>
+    </div>
+    <input type="file" id="attach-doc-upload" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" style="display:none"
+      onchange="handleAttachNewDoc(event,'${qualifId}','${personnelId||''}')">`;
+  document.getElementById('modal-footer').innerHTML = `<button class="btn btn-ghost" onclick="closeModal('modal-main')">Annuler</button>`;
+  openModal('modal-main');
+}
+
+function linkDocToQualif(qualifId, docId, personnelId) {
+  const q = DB.qualifications.find(x=>x.id===qualifId);
+  if (!q) return;
+  q.docId = docId;
+  save('qualifications');
+  syncUpsert('qualifications', q);
+  closeModal('modal-main');
+  if (personnelId) openDetailPersonnel(personnelId);
+  else showPage('diplomes');
+}
+
+function handleAttachNewDoc(event, qualifId, personnelId) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const ext = file.name.split('.').pop().toLowerCase();
+  const type = ['jpg','jpeg','png','webp'].includes(ext)?'image':ext==='pdf'?'pdf':['xls','xlsx'].includes(ext)?'excel':'word';
+  const q = DB.qualifications.find(x=>x.id===qualifId);
+  const docId = uid();
+  const key = `${docId}-${file.name.replace(/[^a-zA-Z0-9._-]/g,'_')}`;
+  const doc = { id:docId, nom:file.name, type, refId:q?.personnelId||null, refNom:null, date:new Date().toLocaleDateString('fr-FR'), size:file.size, key };
+  DB.documents.push(doc);
+  // Lier directement à la qualification
+  if (q) { q.docId = docId; save('qualifications'); syncUpsert('qualifications', q); }
+  save('documents');
+  closeModal('modal-main');
+  // Upload vers R2
+  uploadToR2(file, key).then(url => {
+    doc.url = url;
+    save('documents');
+    syncUpsert('documents', doc);
+  }).catch(() => {
+    const fr = new FileReader();
+    fr.onload = e => { doc.dataUrl = e.target.result; save('documents'); syncUpsert('documents', doc); };
+    fr.readAsDataURL(file);
+  });
+  if (personnelId) openDetailPersonnel(personnelId);
+  else showPage('diplomes');
 }
 
 function openDocFromQualif(docId) {
