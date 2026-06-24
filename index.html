@@ -768,6 +768,7 @@ function generateNotifications() {
 // ============================================================
 function getStatus(dateStr) {
   if (!dateStr) return {status:'unknown',days:0,label:'—'};
+  if (dateStr === 'illimite') return {status:'ok',days:99999,label:'Illimité'};
   const today = new Date(); today.setHours(0,0,0,0);
   const d = new Date(dateStr);
   const days = Math.ceil((d - today) / 86400000);
@@ -778,6 +779,7 @@ function getStatus(dateStr) {
 
 function fmtDate(s) {
   if (!s) return '—';
+  if (s === 'illimite') return '♾️ Illimité';
   const [y,m,d] = s.split('-');
   return `${d}/${m}/${y}`;
 }
@@ -786,6 +788,7 @@ function badgeFor(dateStr) {
   const {status,label} = getStatus(dateStr);
   if (status==='expired') return `<span class="badge badge-red"><span class="dot dot-red"></span>${label}</span>`;
   if (status==='soon') return `<span class="badge badge-amber"><span class="dot dot-amber"></span>${label}</span>`;
+  if (status==='ok' && dateStr==='illimite') return `<span class="badge badge-blue"><span class="dot" style="background:var(--blue)"></span>♾️ Illimité</span>`;
   if (status==='ok') return `<span class="badge badge-green"><span class="dot dot-green"></span>Valide</span>`;
   return `<span class="badge badge-gray">—</span>`;
 }
@@ -799,7 +802,7 @@ function catIcon(cat, souscat) {
     if (s.includes('remorque')) return '🚚';
     if (s.includes('grue')) return '🏗️';
   }
-  const icons = {Bouteille:'🫧',Plongée:'🤿',Véhicule:'🚛',Engin:'🏗️',EPI:'🦺',Autre:'📦','Aptitude médicale':'🏥',Diplôme:'🎓','Permis / Habilitation':'📋',Formation:'📚'};
+  const icons = {Bouteille:'🫧',Plongée:'🤿',Véhicule:'🚛',Engin:'🏗️',EPI:'🦺',Bateau:'⛵',Autre:'📦','Aptitude médicale':'🏥',Diplôme:'🎓','Permis / Habilitation':'📋',Formation:'📚'};
   return icons[cat] || '📦';
 }
 
@@ -869,7 +872,7 @@ function renderDashboard() {
   }).join('');
 
   // Conformité par catégorie
-  const cats = ['Bouteille','Plongée','Véhicule','Engin','EPI'];
+  const cats = ['Bouteille','Plongée','Véhicule','Engin','EPI','Bateau'];
   const catStats = cats.map(cat => {
     const items = DB.materiel.filter(m=>m.categorie===cat);
     if (!items.length) return null;
@@ -1027,9 +1030,9 @@ function renderMaterielPage(filter) {
   let items = DB.materiel;
   let title = 'Tout le matériel';
   if (filter==='plongee') { items = items.filter(m=>['Bouteille','Plongée','EPI'].includes(m.categorie)); title='Matériel de plongée'; }
-  if (filter==='vehicules') { items = items.filter(m=>['Véhicule','Engin'].includes(m.categorie)); title='Véhicules & Engins'; }
+  if (filter==='vehicules') { items = items.filter(m=>['Véhicule','Engin','Bateau'].includes(m.categorie)); title='Véhicules & Engins'; }
 
-  const cats = ['Tous','Bouteille','Plongée','EPI','Véhicule','Engin','Autre'];
+  const cats = ['Tous','Bouteille','Plongée','EPI','Véhicule','Engin','Bateau','Autre'];
   const rows = items.map(m => `
     <tr onclick="openDetailMateriel('${m.id}')" style="cursor:pointer">
       <td><div class="td-name">${m.nom}</div><div class="td-sub">${m.ref||''}</div></td>
@@ -1076,10 +1079,20 @@ function openAddMateriel(id) {
     <div class="field field-full"><label>Nom / désignation *</label><input id="mat-nom" value="${m?.nom||''}" placeholder="Ex : Bloc 12L — B047"></div>
     <div class="field"><label>Référence / N° de série</label><input id="mat-ref" value="${m?.ref||''}" placeholder="Ex : UW-2024-047"></div>
     <div class="field"><label>Catégorie *</label><select id="mat-cat">
-      ${['Bouteille','Plongée','EPI','Véhicule','Engin','Autre'].map(c=>`<option value="${c}" ${m?.categorie===c?'selected':''}>${catIcon(c)} ${c}</option>`).join('')}
+      ${['Bouteille','Plongée','EPI','Véhicule','Engin','Bateau','Autre'].map(c=>`<option value="${c}" ${m?.categorie===c?'selected':''}>${catIcon(c)} ${c}</option>`).join('')}
     </select></div>
     <div class="field"><label>Sous-type</label><input id="mat-souscat" value="${m?.souscat||''}" placeholder="Ex : Détendeur, Camion, Grue..."></div>
-    <div class="field"><label>Date de fin de validité *</label><input type="date" id="mat-date" value="${m?.dateValidite||''}"></div>
+    <div class="field"><label>Date de fin de validité *</label>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <button type="button" id="mat-toggle-illimite" onclick="toggleIllimite('mat')"
+          style="padding:6px 12px;border-radius:8px;font-size:12px;border:1px solid var(--border);background:${m?.dateValidite==='illimite'?'var(--blue)':'var(--surface2)'};color:${m?.dateValidite==='illimite'?'#fff':'var(--text2)'};cursor:pointer;white-space:nowrap">
+          ♾️ Illimité
+        </button>
+        <input type="date" id="mat-date" value="${m?.dateValidite && m.dateValidite!=='illimite' ? m.dateValidite : ''}"
+          style="flex:1;display:${m?.dateValidite==='illimite'?'none':'block'}">
+        <span id="mat-illimite-label" style="display:${m?.dateValidite==='illimite'?'block':'none'};color:var(--blue2);font-size:14px;font-weight:500">♾️ Pas de date d'expiration</span>
+      </div>
+    </div>
     <div class="field"><label>Organisme certificateur</label><input id="mat-org" value="${m?.organisme||''}" placeholder="Ex : Bureau Veritas, APAVE..."></div>
     <div class="field field-full"><label>Notes</label><textarea id="mat-notes">${m?.notes||''}</textarea></div>
   </div>`;
@@ -1090,10 +1103,38 @@ function openAddMateriel(id) {
 }
 function openEditMateriel(id) { openAddMateriel(id); }
 
+function toggleIllimite(prefix) {
+  const btn = document.getElementById(prefix + '-toggle-illimite');
+  const dateInput = document.getElementById(prefix + '-date');
+  const label = document.getElementById(prefix + '-illimite-label');
+  const isNowIllimite = dateInput.style.display === 'none';
+  if (isNowIllimite) {
+    // Désactiver illimité → montrer le champ date
+    dateInput.style.display = 'block';
+    label.style.display = 'none';
+    btn.style.background = 'var(--surface2)';
+    btn.style.color = 'var(--text2)';
+  } else {
+    // Activer illimité → cacher le champ date
+    dateInput.style.display = 'none';
+    label.style.display = 'block';
+    btn.style.background = 'var(--blue)';
+    btn.style.color = '#fff';
+    dateInput.value = '';
+  }
+}
+
+function getDateOrIllimite(prefix) {
+  const dateInput = document.getElementById(prefix + '-date');
+  if (!dateInput) return '';
+  if (dateInput.style.display === 'none') return 'illimite';
+  return dateInput.value;
+}
+
 function saveMateriel(id) {
   const nom = document.getElementById('mat-nom').value.trim();
-  const date = document.getElementById('mat-date').value;
-  if (!nom || !date) { alert('Nom et date requis'); return; }
+  const date = getDateOrIllimite('mat');
+  if (!nom || !date) { alert('Nom et date (ou Illimité) requis'); return; }
   const data = {
     nom, ref:document.getElementById('mat-ref').value.trim(),
     categorie:document.getElementById('mat-cat').value,
@@ -1335,7 +1376,17 @@ function openAddQualif(personnelId, qualifId) {
       ${['Aptitude médicale','Diplôme','Permis / Habilitation','Formation','Autre'].map(t=>`<option value="${t}" ${q?.type===t?'selected':''}>${catIcon(t)} ${t}</option>`).join('')}
     </select></div>
     <div class="field"><label>Nom / Intitulé *</label><input id="q-nom" value="${q?.nom||''}" placeholder="Ex : Certificat médical plongée"></div>
-    <div class="field"><label>Date de fin de validité *</label><input type="date" id="q-date" value="${q?.dateValidite||''}"></div>
+    <div class="field"><label>Date de fin de validité *</label>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <button type="button" id="q-toggle-illimite" onclick="toggleIllimite('q')"
+          style="padding:6px 12px;border-radius:8px;font-size:12px;border:1px solid var(--border);background:${q?.dateValidite==='illimite'?'var(--blue)':'var(--surface2)'};color:${q?.dateValidite==='illimite'?'#fff':'var(--text2)'};cursor:pointer;white-space:nowrap">
+          ♾️ Illimité
+        </button>
+        <input type="date" id="q-date" value="${q?.dateValidite && q.dateValidite!=='illimite' ? q.dateValidite : ''}"
+          style="flex:1;display:${q?.dateValidite==='illimite'?'none':'block'}">
+        <span id="q-illimite-label" style="display:${q?.dateValidite==='illimite'?'block':'none'};color:var(--blue2);font-size:14px;font-weight:500">♾️ Pas de date d'expiration</span>
+      </div>
+    </div>
     <div class="field"><label>Organisme / Autorité</label><input id="q-org" value="${q?.organisme||''}" placeholder="Ex : Médecine du travail, FFESSM..."></div>
     <div class="field field-full"><label>Notes</label><textarea id="q-notes">${q?.notes||''}</textarea></div>
   </div>`;
@@ -1347,7 +1398,7 @@ function openAddQualif(personnelId, qualifId) {
 
 function saveQualif(id) {
   const nom = document.getElementById('q-nom').value.trim();
-  const date = document.getElementById('q-date').value;
+  const date = getDateOrIllimite('q');
   const personnelId = document.getElementById('q-personnel').value;
   if (!nom || !date || !personnelId) { alert('Champs requis incomplets'); return; }
   const data = { nom, type:document.getElementById('q-type').value, dateValidite:date, personnelId, organisme:document.getElementById('q-org').value.trim(), notes:document.getElementById('q-notes').value.trim() };
@@ -1624,7 +1675,7 @@ async function analyzeWithClaude(base64, mediaType, target) {
         model: 'claude-sonnet-4-6', max_tokens: 512,
         messages: [{ role: 'user', content: [
           contentBlock,
-          { type: 'text', text: 'Extrait de ce document les informations suivantes en JSON strict (sans markdown):\n{"nom":"désignation ou titre","date_validite":"YYYY-MM-DD","organisme":"","type":"","serie":""}\nSi une info est absente, mets null. Réponds UNIQUEMENT avec le JSON.' }
+          { type: 'text', text: 'Extrait de ce document les informations suivantes en JSON strict (sans markdown):\n{"nom":"désignation ou titre","date_validite":"YYYY-MM-DD ou illimite si pas de date expiration","organisme":"","type":"","serie":""}\nSi la date est illimitée/permanente/sans expiration, mets "illimite". Si une info est absente, mets null. Réponds UNIQUEMENT avec le JSON.' }
         ]}]
       })
     });
@@ -1633,7 +1684,19 @@ async function analyzeWithClaude(base64, mediaType, target) {
     const text = data.content?.[0]?.text || '';
     const parsed = JSON.parse(text.replace(/```json|```/g,'').trim());
     if (parsed.nom && document.getElementById(target==='mat'?'mat-nom':'q-nom')) document.getElementById(target==='mat'?'mat-nom':'q-nom').value = parsed.nom;
-    if (parsed.date_validite) document.getElementById(target==='mat'?'mat-date':'q-date').value = parsed.date_validite;
+    if (parsed.date_validite) {
+      if (parsed.date_validite === 'illimite') {
+        // Activer le toggle illimité
+        const dateInput = document.getElementById(target==='mat'?'mat-date':'q-date');
+        if (dateInput) { dateInput.style.display = 'none'; dateInput.value = ''; }
+        const lbl = document.getElementById(target==='mat'?'mat-illimite-label':'q-illimite-label');
+        if (lbl) lbl.style.display = 'block';
+        const btn = document.getElementById(target==='mat'?'mat-toggle-illimite':'q-toggle-illimite');
+        if (btn) { btn.style.background = 'var(--blue)'; btn.style.color = '#fff'; }
+      } else {
+        document.getElementById(target==='mat'?'mat-date':'q-date').value = parsed.date_validite;
+      }
+    }
     if (parsed.organisme && document.getElementById(target==='mat'?'mat-org':'q-org')) document.getElementById(target==='mat'?'mat-org':'q-org').value = parsed.organisme || '';
     if (parsed.serie && document.getElementById('mat-ref')) document.getElementById('mat-ref').value = parsed.serie || '';
     if (resultEl) resultEl.innerHTML = '<span class="ai-badge">✅ Document analysé — vérifiez les champs</span>';
@@ -1678,7 +1741,7 @@ function renderStats() {
   const ok = allItems.filter(x=>getStatus(x.dateValidite).status==='ok');
   const conf = allItems.length ? Math.round(((ok.length+soon.length)/allItems.length)*100) : 100;
 
-  const cats = ['Bouteille','Plongée','EPI','Véhicule','Engin'];
+  const cats = ['Bouteille','Plongée','EPI','Véhicule','Engin','Bateau'];
   const catBars = cats.map(cat => {
     const items = DB.materiel.filter(m=>m.categorie===cat);
     if (!items.length) return '';
