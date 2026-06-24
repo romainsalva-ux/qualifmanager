@@ -1215,10 +1215,16 @@ function openDetailPersonnel(id) {
   const p = DB.personnel.find(x=>x.id===id);
   if (!p) return;
   const qualifs = DB.qualifications.filter(q=>q.personnelId===id);
-  const qRows = qualifs.map(q=>`
+  const qRows = qualifs.map(q=>{
+    const linkedDoc = DB.documents.find(d=>d.refId===q.id || (d.refId===id && d.nom.toLowerCase().includes(q.nom.toLowerCase().slice(0,8))));
+    const docUrl = linkedDoc?.url || linkedDoc?.dataUrl || null;
+    const typeCell = docUrl
+      ? `<span class="cat-chip" onclick="event.stopPropagation();openDocFromQualif('${linkedDoc.id}')" style="cursor:pointer;border:1px solid var(--blue2)" title="Cliquer pour ouvrir le document">${catIcon(q.type)} ${q.type} 📎</span>`
+      : `<span class="cat-chip">${catIcon(q.type)} ${q.type}</span>`;
+    return `
     <tr>
       <td><div class="td-name">${q.nom}</div></td>
-      <td><span class="cat-chip">${catIcon(q.type)} ${q.type}</span></td>
+      <td>${typeCell}</td>
       <td>${fmtDate(q.dateValidite)}</td>
       <td>${badgeFor(q.dateValidite)}</td>
       <td>${q.organisme||'—'}</td>
@@ -1226,7 +1232,8 @@ function openDetailPersonnel(id) {
         <button class="btn btn-ghost btn-sm" onclick="openAddQualif('${id}','${q.id}')">✏️</button>
         <button class="btn btn-danger btn-sm" onclick="deleteQualif('${q.id}','${id}')">🗑</button>
       </td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('');
 
   document.getElementById('detail-title').innerHTML = `<div style="display:flex;align-items:center;gap:12px"><div class="person-avatar" style="background:${p.color||'var(--blue)'};width:38px;height:38px;font-size:14px">${p.nom.split(' ').map(x=>x[0]).join('').slice(0,2).toUpperCase()}</div>${p.nom}</div>`;
   document.getElementById('detail-body').innerHTML = `
@@ -1267,9 +1274,14 @@ function renderDiplomes() {
   const types = ['Tous','Aptitude médicale','Diplôme','Permis / Habilitation','Formation'];
   const rows = DB.qualifications.map(q => {
     const p = DB.personnel.find(x=>x.id===q.personnelId);
+    const linkedDoc = DB.documents.find(d=>d.refId===q.id || (d.refId===q.personnelId && d.nom.toLowerCase().includes(q.nom.toLowerCase().slice(0,8))));
+    const docUrl = linkedDoc?.url || linkedDoc?.dataUrl || null;
+    const typeCell = docUrl
+      ? `<span class="cat-chip" onclick="event.stopPropagation();openDocFromQualif('${linkedDoc.id}')" style="cursor:pointer;border:1px solid var(--blue2)" title="Cliquer pour ouvrir le document">${catIcon(q.type)} ${q.type} 📎</span>`
+      : `<span class="cat-chip">${catIcon(q.type)} ${q.type}</span>`;
     return `<tr>
       <td><div class="td-name">${q.nom}</div><div class="td-sub">${q.organisme||''}</div></td>
-      <td><span class="cat-chip">${catIcon(q.type)} ${q.type}</span></td>
+      <td>${typeCell}</td>
       <td><div style="display:flex;align-items:center;gap:8px"><div class="person-avatar" style="background:${p?.color||'var(--blue)'};width:24px;height:24px;font-size:10px;flex-shrink:0">${p?.nom.split(' ').map(x=>x[0]).join('').slice(0,2).toUpperCase()||'?'}</div><span>${p?.nom||'—'}</span></div></td>
       <td>${fmtDate(q.dateValidite)}</td>
       <td>${badgeFor(q.dateValidite)}</td>
@@ -1453,6 +1465,18 @@ function openUploadDoc(refId) {
   </select></div>` : ''}`;
   document.getElementById('modal-footer').innerHTML = `<button class="btn btn-ghost" onclick="closeModal('modal-main')">Annuler</button>`;
   openModal('modal-main');
+}
+
+function openDocFromQualif(docId) {
+  const d = DB.documents.find(x=>x.id===docId);
+  if (!d) return;
+  const fileUrl = d.url || d.dataUrl || null;
+  if (!fileUrl) { alert('Document non disponible'); return; }
+  if (d.type === 'image') {
+    previewDoc(docId);
+  } else {
+    window.open(fileUrl, '_blank');
+  }
 }
 
 function deleteDoc(id) {
