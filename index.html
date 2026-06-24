@@ -790,7 +790,15 @@ function badgeFor(dateStr) {
   return `<span class="badge badge-gray">—</span>`;
 }
 
-function catIcon(cat) {
+function catIcon(cat, souscat) {
+  if (souscat) {
+    const s = souscat.toLowerCase();
+    if (s.includes('bateau') || s.includes('navire') || s.includes('voile') || s.includes('vedette') || s.includes('zodiac') || s.includes('annexe')) return '⛵';
+    if (s.includes('moto')) return '🏍️';
+    if (s.includes('voiture') || s.includes('berline') || s.includes('break')) return '🚗';
+    if (s.includes('remorque')) return '🚚';
+    if (s.includes('grue')) return '🏗️';
+  }
   const icons = {Bouteille:'🫧',Plongée:'🤿',Véhicule:'🚛',Engin:'🏗️',EPI:'🦺',Autre:'📦','Aptitude médicale':'🏥',Diplôme:'🎓','Permis / Habilitation':'📋',Formation:'📚'};
   return icons[cat] || '📦';
 }
@@ -1025,7 +1033,7 @@ function renderMaterielPage(filter) {
   const rows = items.map(m => `
     <tr onclick="openDetailMateriel('${m.id}')" style="cursor:pointer">
       <td><div class="td-name">${m.nom}</div><div class="td-sub">${m.ref||''}</div></td>
-      <td><span class="cat-chip">${catIcon(m.categorie)} ${m.categorie}</span></td>
+      <td><span class="cat-chip">${catIcon(m.categorie, m.souscat)} ${m.categorie}</span></td>
       <td>${m.souscat||'—'}</td>
       <td>${fmtDate(m.dateValidite)}</td>
       <td>${badgeFor(m.dateValidite)}</td>
@@ -1120,7 +1128,7 @@ function openDetailMateriel(id) {
   document.getElementById('detail-body').innerHTML = `
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
     <div class="card card-sm"><div style="font-size:11px;color:var(--text3);margin-bottom:4px">Référence</div><div style="font-weight:500">${m.ref||'—'}</div></div>
-    <div class="card card-sm"><div style="font-size:11px;color:var(--text3);margin-bottom:4px">Catégorie</div><div>${catIcon(m.categorie)} ${m.categorie} ${m.souscat?'· '+m.souscat:''}</div></div>
+    <div class="card card-sm"><div style="font-size:11px;color:var(--text3);margin-bottom:4px">Catégorie</div><div>${catIcon(m.categorie, m.souscat)} ${m.categorie} ${m.souscat?'· '+m.souscat:''}</div></div>
     <div class="card card-sm"><div style="font-size:11px;color:var(--text3);margin-bottom:4px">Validité</div><div style="font-weight:500">${fmtDate(m.dateValidite)}</div></div>
     <div class="card card-sm"><div style="font-size:11px;color:var(--text3);margin-bottom:4px">Statut</div>${badgeFor(m.dateValidite)}</div>
     <div class="card card-sm field-full" style="grid-column:1/-1"><div style="font-size:11px;color:var(--text3);margin-bottom:4px">Organisme</div><div>${m.organisme||'—'}</div></div>
@@ -1452,17 +1460,25 @@ function handleDocUpload(event, refId) {
 
 function openUploadDoc(refId) {
   document.getElementById('modal-title').textContent = 'Importer un document';
+  const allItems = [
+    ...DB.materiel.map(m => ({id: m.id, label: '🔧 ' + m.nom})),
+    ...DB.personnel.map(p => ({id: p.id, label: '👤 ' + p.nom}))
+  ];
   document.getElementById('modal-body').innerHTML = `
   <div class="scan-zone" onclick="document.getElementById('doc-upload-modal').click()">
     <span class="scan-zone-icon">📂</span>
     <p>Cliquez pour sélectionner un fichier</p>
     <p class="scan-hint">Photo (JPG/PNG), PDF, Word (.docx), Excel (.xlsx)</p>
   </div>
-  <input type="file" id="doc-upload-modal" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" style="display:none" onchange="handleDocUpload(event,'${refId||''}');closeModal('modal-main')">
-  ${DB.materiel.length ? `<div class="field" style="margin-top:12px"><label>Lier à un équipement (optionnel)</label><select id="doc-ref-select">
-    <option value="">— Non lié —</option>
-    ${DB.materiel.map(m=>`<option value="${m.id}" ${refId===m.id?'selected':''}>${m.nom}</option>`).join('')}
-  </select></div>` : ''}`;
+  <input type="file" id="doc-upload-modal" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" style="display:none"
+    onchange="handleDocUpload(event, document.getElementById('doc-ref-select').value || '');closeModal('modal-main')">
+  <div class="field" style="margin-top:12px">
+    <label>Lier à un équipement ou agent</label>
+    <select id="doc-ref-select">
+      <option value="">— Non lié —</option>
+      ${allItems.map(item => `<option value="${item.id}" ${refId===item.id?'selected':''}>${item.label}</option>`).join('')}
+    </select>
+  </div>`;
   document.getElementById('modal-footer').innerHTML = `<button class="btn btn-ghost" onclick="closeModal('modal-main')">Annuler</button>`;
   openModal('modal-main');
 }
