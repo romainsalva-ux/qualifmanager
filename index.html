@@ -421,6 +421,66 @@ if (SUPABASE_URL !== 'VOTRE_URL_ICI' && SUPABASE_ANON_KEY !== 'VOTRE_ANON_KEY_IC
   sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 }
 
+// ============================================================
+// CLOUDFLARE R2 CONFIG
+// ============================================================
+const R2_ACCOUNT_ID = '95c20f509cfad82d40d1d43ecafe08e6';
+const R2_ACCESS_KEY_ID = 'ad4e9149ea6f4c7a9ef53a47a33866b3';
+const R2_SECRET_ACCESS_KEY = '8fb35eb985cbe1eeee6c56093398479d77849d28bd3149772b978d65b7c4ff0e';
+const R2_BUCKET = 'qualifmanager-docs';
+const R2_PUBLIC_URL = 'https://pub-5985ab0e232c476594da85f5b258032d.r2.dev;
+
+// Upload un fichier vers R2 via l'API S3-compatible
+async function uploadToR2(file, key) {
+  const endpoint = `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com/${R2_BUCKET}/${key}`;
+  // Signature AWS4-HMAC-SHA256 (S3 compatible)
+  const now = new Date();
+  const dateStr = now.toISOString().replace(/[-:]/g,'').split('.')[0]+'Z';
+  const dateShort = dateStr.slice(0,8);
+  const region = 'auto';
+  const service = 's3';
+
+  // Hash du body
+  const bodyBuffer = await file.arrayBuffer();
+  const hashBuffer = await crypto.subtle.digest('SHA-256', bodyBuffer);
+  const bodyHash = Array.from(new Uint8Array(hashBuffer)).map(b=>b.toString(16).padStart(2,'0')).join('');
+
+  const canonicalHeaders = `content-type:${file.type||'application/octet-stream'}\nhost:${R2_ACCOUNT_ID}.r2.cloudflarestorage.com\nx-amz-content-sha256:${bodyHash}\nx-amz-date:${dateStr}\n`;
+  const signedHeaders = 'content-type;host;x-amz-content-sha256;x-amz-date';
+  const canonicalRequest = `PUT\n/${R2_BUCKET}/${key}\n\n${canonicalHeaders}\n${signedHeaders}\n${bodyHash}`;
+
+  const credentialScope = `${dateShort}/${region}/${service}/aws4_request`;
+  const crHash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(canonicalRequest)))).map(b=>b.toString(16).padStart(2,'0')).join('');
+  const stringToSign = `AWS4-HMAC-SHA256\n${dateStr}\n${credentialScope}\n${crHash}`;
+
+  // Dériver la clé de signature
+  async function hmac(key, data) {
+    const k = typeof key === 'string' ? new TextEncoder().encode(key) : key;
+    const cryptoKey = await crypto.subtle.importKey('raw', k, {name:'HMAC',hash:'SHA-256'}, false, ['sign']);
+    return new Uint8Array(await crypto.subtle.sign('HMAC', cryptoKey, new TextEncoder().encode(data)));
+  }
+  const kDate = await hmac('AWS4' + R2_SECRET_ACCESS_KEY, dateShort);
+  const kRegion = await hmac(kDate, region);
+  const kService = await hmac(kRegion, service);
+  const kSigning = await hmac(kService, 'aws4_request');
+  const signature = Array.from(await hmac(kSigning, stringToSign)).map(b=>b.toString(16).padStart(2,'0')).join('');
+
+  const authHeader = `AWS4-HMAC-SHA256 Credential=${R2_ACCESS_KEY_ID}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
+
+  const res = await fetch(endpoint, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': file.type || 'application/octet-stream',
+      'x-amz-date': dateStr,
+      'x-amz-content-sha256': bodyHash,
+      'Authorization': authHeader
+    },
+    body: bodyBuffer
+  });
+  if (!res.ok) throw new Error(`R2 upload failed: ${res.status} ${await res.text()}`);
+  return `${R2_PUBLIC_URL}/${key}`;
+}
+
 function setSyncStatus(state) {
   // state: 'offline' | 'syncing' | 'online'
   const dot = document.getElementById('sync-dot');
@@ -1314,42 +1374,48 @@ function renderDocuments() {
 function handleDocUpload(event, refId) {
   const files = event.target.files;
   if (!files.length) return;
-  Array.from(files).forEach(file => {
+  Array.from(files).forEach(async file => {
     const ext = file.name.split('.').pop().toLowerCase();
     const type = ['jpg','jpeg','png','webp'].includes(ext)?'image':ext==='pdf'?'pdf':['xls','xlsx'].includes(ext)?'excel':'word';
     const refItem = refId ? (DB.materiel.find(x=>x.id===refId)||DB.personnel.find(x=>x.id===refId)) : null;
-    const doc = { id:uid(), nom:file.name, type, refId:refId||null, refNom:refItem?.nom||null, date:new Date().toLocaleDateString('fr-FR'), size:file.size };
+    const docId = uid();
+    const key = `${docId}-${file.name.replace(/[^a-zA-Z0-9._-]/g,'_')}`;
+    const doc = { id:docId, nom:file.name, type, refId:refId||null, refNom:refItem?.nom||null, date:new Date().toLocaleDateString('fr-FR'), size:file.size, key };
+
     DB.documents.push(doc);
+    save('documents');
+    showPage('documents');
 
-    // Toujours lire le fichier en base64 pour le conserver (aperçu, IA, sync)
-    const fileReader = new FileReader();
-    fileReader.onload = e => {
-      doc.dataUrl = e.target.result; // data:<mime>;base64,xxxx
-      save('documents');
-      syncUpsert('documents', doc);
-    };
-    fileReader.onerror = () => {
-      save('documents');
-    };
-    fileReader.readAsDataURL(file);
+    try {
+      // Upload vers R2
+      const publicUrl = await uploadToR2(file, key);
+      doc.url = publicUrl;
 
-    // If Excel, also parse a table preview
-    if (type==='excel') {
-      const reader = new FileReader();
-      reader.onload = e => {
-        try {
-          const wb = XLSX.read(e.target.result, {type:'array'});
-          const ws = wb.Sheets[wb.SheetNames[0]];
-          doc.excelData = XLSX.utils.sheet_to_json(ws, {header:1}).slice(0,20);
+      // Si Excel, parser le contenu
+      if (type === 'excel') {
+        const reader = new FileReader();
+        reader.onload = e => {
+          try {
+            const wb = XLSX.read(e.target.result, {type:'array'});
+            const ws = wb.Sheets[wb.SheetNames[0]];
+            doc.excelData = XLSX.utils.sheet_to_json(ws, {header:1}).slice(0,20);
+          } catch(e) {}
           save('documents');
           syncUpsert('documents', doc);
-        } catch(e) {}
-      };
-      reader.readAsArrayBuffer(file);
+        };
+        reader.readAsArrayBuffer(file);
+      } else {
+        save('documents');
+        syncUpsert('documents', doc);
+      }
+    } catch(err) {
+      console.error('Erreur upload R2:', err);
+      // Fallback : stocker en base64 localement si R2 échoue
+      const fr = new FileReader();
+      fr.onload = e => { doc.dataUrl = e.target.result; save('documents'); syncUpsert('documents', doc); };
+      fr.readAsDataURL(file);
     }
   });
-  save('documents');
-  showPage('documents');
 }
 
 function openUploadDoc(refId) {
@@ -1382,20 +1448,22 @@ function previewDoc(id) {
   if (!d) return;
   document.getElementById('detail-title').textContent = d.nom;
 
+  const fileUrl = d.url || d.dataUrl || null;
+
   let previewHtml = '';
-  if (d.dataUrl) {
+  if (fileUrl) {
     if (d.type === 'image') {
-      previewHtml = `<div style="text-align:center;margin-bottom:12px"><img src="${d.dataUrl}" style="max-width:100%;max-height:400px;border-radius:8px;border:1px solid var(--border)"></div>`;
+      previewHtml = `<div style="text-align:center;margin-bottom:12px"><img src="${fileUrl}" style="max-width:100%;max-height:400px;border-radius:8px;border:1px solid var(--border)"></div>`;
     } else if (d.type === 'pdf') {
       previewHtml = `
         <div style="margin-bottom:12px">
-          <embed src="${d.dataUrl}" type="application/pdf" style="width:100%;height:420px;border:1px solid var(--border);border-radius:8px"></embed>
+          <embed src="${fileUrl}" type="application/pdf" style="width:100%;height:420px;border:1px solid var(--border);border-radius:8px"></embed>
         </div>
         <div style="text-align:center;margin-bottom:12px">
-          <a href="${d.dataUrl}" download="${d.nom}" class="btn btn-primary" style="text-decoration:none">⬇️ Télécharger le PDF</a>
+          <a href="${fileUrl}" download="${d.nom}" class="btn btn-primary" style="text-decoration:none">⬇️ Télécharger le PDF</a>
         </div>`;
     } else {
-      previewHtml = `<div style="text-align:center;padding:20px"><a href="${d.dataUrl}" download="${d.nom}" class="btn btn-primary" style="text-decoration:none">⬇️ Télécharger ${d.nom}</a></div>`;
+      previewHtml = `<div style="text-align:center;padding:20px"><a href="${fileUrl}" download="${d.nom}" class="btn btn-primary" style="text-decoration:none">⬇️ Télécharger ${d.nom}</a></div>`;
     }
   } else if (d.excelData) {
     previewHtml = `<div class="section-title">Aperçu du contenu Excel</div><div style="overflow:auto;max-height:300px;font-size:12px;font-family:var(--mono)"><table style="border-collapse:collapse;width:100%">${d.excelData.map(row=>`<tr>${row.map(cell=>`<td style="border:1px solid var(--border);padding:4px 8px;white-space:nowrap">${cell||''}</td>`).join('')}</tr>`).join('')}</table></div>`;
