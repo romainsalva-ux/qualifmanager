@@ -520,10 +520,10 @@ async function pullAllFromSupabase() {
   if (!sb || !currentUser) return;
   try {
     const [matRes, persRes, qualRes, docRes] = await Promise.all([
-      sb.from('equipements').select('*').eq('user_id', currentUser.id),
-      sb.from('personnel').select('*').eq('user_id', currentUser.id),
-      sb.from('qualifications').select('*').eq('user_id', currentUser.id),
-      sb.from('documents').select('*').eq('user_id', currentUser.id),
+      sb.from('equipements').select('*').eq('org_id', 'bonna-tp'),
+      sb.from('personnel').select('*').eq('org_id', 'bonna-tp'),
+      sb.from('qualifications').select('*').eq('org_id', 'bonna-tp'),
+      sb.from('documents').select('*').eq('org_id', 'bonna-tp'),
     ]);
     if (matRes.error) throw matRes.error;
     if (persRes.error) throw persRes.error;
@@ -556,7 +556,7 @@ async function syncUpsert(key, item) {
   setSyncStatus('syncing');
   try {
     const { id, ...rest } = item;
-    const { error } = await sb.from(table).upsert({ id, data: rest, user_id: currentUser.id, updated_at: new Date().toISOString() });
+    const { error } = await sb.from(table).upsert({ id, data: rest, org_id: 'bonna-tp', updated_at: new Date().toISOString() });
     if (error) throw error;
     setSyncStatus('online');
   } catch (err) {
@@ -572,7 +572,7 @@ async function syncDelete(key, id) {
   if (!table) return;
   setSyncStatus('syncing');
   try {
-    const { error } = await sb.from(table).delete().eq('id', id).eq('user_id', currentUser.id);
+    const { error } = await sb.from(table).delete().eq('id', id).eq('org_id', 'bonna-tp');
     if (error) throw error;
     setSyncStatus('online');
   } catch (err) {
@@ -586,7 +586,7 @@ function subscribeRealtime() {
   if (!sb || !currentUser) return;
   Object.entries(TABLE_MAP).forEach(([key, table]) => {
     const channel = sb.channel('rt-' + table)
-      .on('postgres_changes', { event: '*', schema: 'public', table, filter: `user_id=eq.${currentUser.id}` }, (payload) => {
+      .on('postgres_changes', { event: '*', schema: 'public', table, filter: `org_id=eq.bonna-tp` }, (payload) => {
         applyRealtimeChange(key, payload);
       })
       .subscribe();
