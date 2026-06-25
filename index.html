@@ -1763,7 +1763,7 @@ Réponds UNIQUEMENT avec le JSON, sans commentaire ni markdown.`;
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-6',
-        max_tokens: 3000,
+        max_tokens: 8000,
         messages: [{ role: 'user', content: userContent }]
       })
     });
@@ -1771,7 +1771,30 @@ Réponds UNIQUEMENT avec le JSON, sans commentaire ni markdown.`;
     const data = await res.json();
     if (data.error) throw new Error(data.error.message);
     const text = data.content?.[0]?.text || '';
-    const parsed = JSON.parse(text.replace(/```json|```/g,'').trim());
+
+    // Extraire le JSON même si la réponse contient du texte autour
+    let jsonStr = text.replace(/```json|```/g,'').trim();
+    // Trouver le premier { ou [ et le dernier } ou ]
+    const firstBrace = jsonStr.indexOf('{');
+    const lastBrace = jsonStr.lastIndexOf('}');
+    if (firstBrace !== -1 && lastBrace !== -1) {
+      jsonStr = jsonStr.substring(firstBrace, lastBrace + 1);
+    }
+
+    let parsed;
+    try {
+      parsed = JSON.parse(jsonStr);
+    } catch(parseErr) {
+      // Tentative de réparation : compléter un JSON tronqué
+      if (!jsonStr.endsWith('}')) {
+        // Fermer les tableaux et objets ouverts
+        const openArrays = (jsonStr.match(/\[/g)||[]).length - (jsonStr.match(/\]/g)||[]).length;
+        const openObjects = (jsonStr.match(/\{/g)||[]).length - (jsonStr.match(/\}/g)||[]).length;
+        for(let i=0;i<openArrays;i++) jsonStr += ']';
+        for(let i=0;i<openObjects;i++) jsonStr += '}';
+        try { parsed = JSON.parse(jsonStr); } catch(e2) { throw new Error('Réponse IA incomplète. Réessayez avec un document plus court ou moins de pages.'); }
+      } else { throw parseErr; }
+    }
     renderMultiDocImportPreview(parsed, docId);
 
   } catch(e) {
@@ -1922,14 +1945,18 @@ Règles :
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-6',
-        max_tokens: 2000,
+        max_tokens: 8000,
         messages: [{ role: 'user', content: prompt }]
       })
     });
     const data = await res.json();
     if (data.error) throw new Error(data.error.message);
     const text = data.content?.[0]?.text || '';
-    const items = JSON.parse(text.replace(/```json|```/g,'').trim());
+    let jsonStr = text.replace(/```json|```/g,'').trim();
+    const firstBracket = jsonStr.indexOf('[');
+    const lastBracket = jsonStr.lastIndexOf(']');
+    if (firstBracket !== -1 && lastBracket !== -1) jsonStr = jsonStr.substring(firstBracket, lastBracket+1);
+    const items = JSON.parse(jsonStr);
 
     // Résoudre les matchId : les IDs dans le prompt sont les vrais IDs de DB.materiel
     // L'IA reçoit la liste avec les vrais IDs (on va les injecter)
