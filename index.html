@@ -1662,6 +1662,156 @@ function openDocFromQualif(docId) {
   }
 }
 
+async function analyzeExcelWithAI(docId) {
+  const apiKey = localStorage.getItem('qm_apikey') || '';
+  if (!apiKey) {
+    alert('Clé API non configurée. Allez dans Alertes → Configuration IA pour la saisir.');
+    return;
+  }
+  const d = DB.documents.find(x=>x.id===docId);
+  if (!d || !d.excelData) { alert('Données Excel non disponibles'); return; }
+
+  const resultEl = document.getElementById('excel-ai-result');
+  resultEl.style.display = 'block';
+  resultEl.innerHTML = `<div style="text-align:center;padding:16px;color:var(--text2)"><span class="spinner"></span> L'IA analyse le fichier Excel...</div>`;
+
+  // Préparer le contexte : équipements existants
+  const existingMateriel = DB.materiel.map(m => `ID:${m.id} | ${m.nom} | ref:${m.ref||'?'} | cat:${m.categorie}`).join('\n');
+  const tableStr = d.excelData.map(row => row.join(' | ')).join('\n');
+
+  const prompt = `Tu es un assistant spécialisé en gestion de matériel de plongée et BTP.
+
+Voici les équipements déjà dans l'application :
+${existingMateriel || 'Aucun équipement existant'}
+
+Voici le contenu d'un fichier Excel de requalification :
+${tableStr}
+
+Analyse ce tableau et extrait chaque équipement/item. Pour chaque ligne, retourne un JSON array (sans markdown) :
+[
+  {
+    "action": "update" ou "create",
+    "nom": "nom de l'équipement",
+    "ref": "référence ou numéro de série",
+    "categorie": "Bouteille|Plongée|EPI|Véhicule|Engin|Bateau|Autre",
+    "souscat": "sous-type si précisé",
+    "dateValidite": "YYYY-MM-DD ou illimite",
+    "organisme": "organisme certificateur",
+    "notes": "remarques importantes",
+    "matchId": "id de l'équipement existant à mettre à jour (ou null si nouveau)"
+  }
+]
+
+Règles :
+- Si un équipement existant correspond (par nom ou référence similaire), utilise action "update" et indique son matchId depuis la liste existante
+- Si c'est un nouvel équipement, utilise action "create"  
+- Pour les dates, convertis tout format de date en YYYY-MM-DD
+- Si aucune date de validité (permanent/illimité), mets "illimite"
+- Catégories disponibles : Bouteille (plongée), Plongée (équipements plongée), EPI (équipements protection), Véhicule, Engin, Bateau, Autre
+- Réponds UNIQUEMENT avec le JSON array, sans commentaire ni markdown`;
+
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 2000,
+        messages: [{ role: 'user', content: prompt }]
+      })
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error.message);
+    const text = data.content?.[0]?.text || '';
+    const items = JSON.parse(text.replace(/```json|```/g,'').trim());
+
+    // Résoudre les matchId : les IDs dans le prompt sont les vrais IDs de DB.materiel
+    // L'IA reçoit la liste avec les vrais IDs (on va les injecter)
+    renderExcelImportPreview(items, docId);
+  } catch(e) {
+    resultEl.innerHTML = `<div style="color:var(--red2);padding:12px;font-size:13px">❌ Erreur : ${e.message}</div>`;
+  }
+}
+
+function renderExcelImportPreview(items, docId) {
+  const resultEl = document.getElementById('excel-ai-result');
+  if (!items.length) {
+    resultEl.innerHTML = `<div style="color:var(--amber2);padding:12px;font-size:13px">⚠️ Aucun équipement détecté dans ce fichier.</div>`;
+    return;
+  }
+
+  const rows = items.map((item, i) => {
+    const existing = item.matchId ? DB.materiel.find(m=>m.id===item.matchId) : null;
+    const badge = item.action==='update'
+      ? `<span style="background:rgba(251,191,36,0.15);color:var(--amber2);padding:2px 8px;border-radius:12px;font-size:11px">✏️ Mise à jour</span>`
+      : `<span style="background:rgba(34,197,94,0.15);color:var(--green2);padding:2px 8px;border-radius:12px;font-size:11px">➕ Nouveau</span>`;
+    return `
+    <div style="border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:8px;background:var(--surface2)">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px">
+        <div style="font-size:13px;font-weight:600">${item.nom||'—'}</div>
+        ${badge}
+      </div>
+      <div style="font-size:11px;color:var(--text3);display:grid;grid-template-columns:1fr 1fr;gap:4px">
+        <div>Réf : ${item.ref||'—'}</div>
+        <div>Catégorie : ${item.categorie||'—'}</div>
+        <div>Validité : ${item.dateValidite==='illimite'?'♾️ Illimité':item.dateValidite||'—'}</div>
+        <div>Organisme : ${item.organisme||'—'}</div>
+        ${existing ? `<div style="grid-column:1/-1;color:var(--amber2)">Remplace : ${existing.nom} (${fmtDate(existing.dateValidite)})</div>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+
+  resultEl.innerHTML = `
+    <div style="border:1px solid var(--border);border-radius:10px;padding:14px">
+      <div style="font-size:13px;font-weight:600;margin-bottom:10px">📋 ${items.length} équipement(s) détecté(s) — vérifiez avant d'importer :</div>
+      <div style="max-height:250px;overflow-y:auto;margin-bottom:12px">${rows}</div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-primary" style="flex:1" onclick="applyExcelImport(${JSON.stringify(items).replace(/"/g,'&quot;')}, '${docId}')">✅ Importer tout</button>
+        <button class="btn btn-ghost" onclick="document.getElementById('excel-ai-result').style.display='none'">Annuler</button>
+      </div>
+    </div>`;
+}
+
+function applyExcelImport(items, docId) {
+  let created = 0, updated = 0;
+  items.forEach(item => {
+    const data = {
+      nom: item.nom || 'Sans nom',
+      ref: item.ref || '',
+      categorie: item.categorie || 'Autre',
+      souscat: item.souscat || '',
+      dateValidite: item.dateValidite || '',
+      organisme: item.organisme || '',
+      notes: item.notes || '',
+    };
+    if (item.action === 'update' && item.matchId) {
+      const idx = DB.materiel.findIndex(m=>m.id===item.matchId);
+      if (idx >= 0) {
+        DB.materiel[idx] = { ...DB.materiel[idx], ...data };
+        syncUpsert('materiel', DB.materiel[idx]);
+        updated++;
+      }
+    } else {
+      const newItem = { id: uid(), ...data };
+      DB.materiel.push(newItem);
+      syncUpsert('materiel', newItem);
+      created++;
+    }
+  });
+  save('materiel');
+  // Lier le document à son import
+  const doc = DB.documents.find(x=>x.id===docId);
+  if (doc) { doc.importedAt = new Date().toISOString(); save('documents'); }
+  closeModal('modal-detail');
+  alert(`✅ Import terminé : ${created} créé(s), ${updated} mis à jour`);
+  showPage('materiel');
+}
+
 function deleteDoc(id) {
   if (!confirm('Supprimer ce document ?')) return;
   DB.documents = DB.documents.filter(x=>x.id!==id);
@@ -1707,7 +1857,19 @@ function previewDoc(id) {
         </div>`;
     }
   } else if (d.excelData) {
-    previewHtml = `<div class="section-title">Aperçu du contenu Excel</div><div style="overflow:auto;max-height:300px;font-size:12px;font-family:var(--mono)"><table style="border-collapse:collapse;width:100%">${d.excelData.map(row=>`<tr>${row.map(cell=>`<td style="border:1px solid var(--border);padding:4px 8px;white-space:nowrap">${cell||''}</td>`).join('')}</tr>`).join('')}</table></div>`;
+    previewHtml = `
+      <div class="section-title">Aperçu du contenu Excel</div>
+      <div style="overflow:auto;max-height:220px;font-size:12px;font-family:var(--mono);margin-bottom:12px">
+        <table style="border-collapse:collapse;width:100%">
+          ${d.excelData.map(row=>`<tr>${row.map(cell=>`<td style="border:1px solid var(--border);padding:4px 8px;white-space:nowrap">${cell||''}</td>`).join('')}</tr>`).join('')}
+        </table>
+      </div>
+      <div style="background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.25);border-radius:10px;padding:14px;margin-bottom:8px">
+        <div style="font-size:13px;font-weight:600;margin-bottom:6px">🤖 Analyse IA du fichier Excel</div>
+        <div style="font-size:12px;color:var(--text2);margin-bottom:10px">L'IA va lire ce tableau, identifier les équipements et leurs dates de requalification, et mettre à jour l'application automatiquement.</div>
+        <button class="btn btn-primary" onclick="analyzeExcelWithAI('${d.id}')" style="width:100%">✨ Analyser et importer les données</button>
+      </div>
+      <div id="excel-ai-result" style="display:none"></div>`;
   } else {
     previewHtml = `<div style="text-align:center;padding:30px;color:var(--text3)"><div style="font-size:48px">${d.type==='pdf'?'📕':d.type==='image'?'🖼️':'📄'}</div><div style="margin-top:8px">Aperçu non disponible (fichier non stocké)</div></div>`;
   }
