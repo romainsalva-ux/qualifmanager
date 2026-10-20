@@ -570,20 +570,22 @@ async function pullAllFromSupabase() {
   if (!sb || !currentUser) return;
   try {
     const [matRes, persRes, qualRes, docRes] = await Promise.all([
-      sb.from('materiel').select('*').order('created_at'),
-      sb.from('personnel').select('*').order('created_at'),
-      sb.from('qualifications').select('*').order('created_at'),
-      sb.from('documents').select('*').order('created_at'),
+      sb.from('materiel').select('*').eq('org_id','bonna-tp').order('created_at'),
+      sb.from('personnel').select('*').eq('org_id','bonna-tp').order('created_at'),
+      sb.from('qualifications').select('*').eq('org_id','bonna-tp').order('created_at'),
+      sb.from('documents').select('*').eq('org_id','bonna-tp').order('created_at'),
     ]);
     if (matRes.error) throw matRes.error;
     if (persRes.error) throw persRes.error;
     if (qualRes.error) throw qualRes.error;
     if (docRes.error) throw docRes.error;
 
+    // materiel : colonnes plates
     DB.materiel = matRes.data || [];
-    DB.personnel = persRes.data || [];
-    DB.qualifications = qualRes.data || [];
-    DB.documents = docRes.data || [];
+    // personnel, qualifications, documents : données dans colonne jsonb "data"
+    DB.personnel = (persRes.data || []).map(r => r.data && typeof r.data === 'object' ? r.data : r);
+    DB.qualifications = (qualRes.data || []).map(r => r.data && typeof r.data === 'object' ? r.data : r);
+    DB.documents = (docRes.data || []).map(r => r.data && typeof r.data === 'object' ? r.data : r);
 
     localStorage.setItem('qm_materiel', JSON.stringify(DB.materiel));
     localStorage.setItem('qm_personnel', JSON.stringify(DB.personnel));
@@ -602,7 +604,14 @@ async function syncUpsert(key, item) {
   if (!table) return;
   setSyncStatus('syncing');
   try {
-    const { error } = await sb.from(table).upsert(item, { onConflict: 'id' });
+    // materiel : colonnes plates. Les autres tables stockent dans colonne "data" jsonb.
+    let payload;
+    if (key === 'materiel') {
+      payload = { ...item, org_id: 'bonna-tp' };
+    } else {
+      payload = { id: item.id, data: item, org_id: 'bonna-tp' };
+    }
+    const { error } = await sb.from(table).upsert(payload, { onConflict: 'id' });
     if (error) throw error;
     setSyncStatus('online');
   } catch (err) {
@@ -632,7 +641,7 @@ function subscribeRealtime() {
   if (!sb || !currentUser) return;
   Object.entries(TABLE_MAP).forEach(([key, table]) => {
     const channel = sb.channel('rt-' + table)
-      .on('postgres_changes', { event: '*', schema: 'public', table }, (payload) => {
+      .on('postgres_changes', { event: '*', schema: 'public', table, filter: 'org_id=eq.bonna-tp' }, (payload) => {
         applyRealtimeChange(key, payload);
       })
       .subscribe();
@@ -646,7 +655,9 @@ function applyRealtimeChange(key, payload) {
     const idx = arr.findIndex(x => x.id === payload.old.id);
     if (idx !== -1) arr.splice(idx, 1);
   } else {
-    const item = payload.new;
+    // materiel : colonnes plates. Les autres : données dans colonne "data" jsonb.
+    const raw = payload.new;
+    const item = (key !== 'materiel' && raw.data && typeof raw.data === 'object') ? raw.data : raw;
     const idx = arr.findIndex(x => x.id === item.id);
     if (idx !== -1) arr[idx] = item; else arr.push(item);
   }
