@@ -272,27 +272,22 @@ tr:hover td{background:rgba(255,255,255,0.02)}
 
 <!-- ÉCRAN DE CONNEXION -->
 <div id="auth-screen" style="position:fixed;inset:0;background:var(--navy);display:flex;align-items:center;justify-content:center;z-index:1000;padding:20px">
-  <div style="width:100%;max-width:380px">
+  <div style="width:100%;max-width:360px">
     <div style="text-align:center;margin-bottom:28px">
       <div style="font-size:36px;margin-bottom:8px">🛡️</div>
       <div style="font-size:22px;font-weight:700;color:var(--text)">QualifManager</div>
-      <div style="font-size:13px;color:var(--text2);margin-top:4px">Gestion des qualifications & matériel</div>
+      <div style="font-size:13px;color:var(--text2);margin-top:4px">BONNA TP — Gestion des qualifications</div>
     </div>
     <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:24px">
       <div id="auth-error" style="display:none;background:rgba(255,59,48,0.12);color:var(--red2);border:1px solid rgba(255,59,48,0.3);border-radius:8px;padding:10px 12px;font-size:13px;margin-bottom:14px"></div>
-      <div style="margin-bottom:12px">
-        <label style="font-size:12px;color:var(--text2);display:block;margin-bottom:6px">Email</label>
-        <input type="email" id="auth-email" placeholder="vous@exemple.com" style="width:100%;background:var(--surface2);border:1px solid var(--border2);border-radius:8px;padding:10px 12px;color:var(--text);font-family:var(--font);font-size:14px">
-      </div>
       <div style="margin-bottom:18px">
         <label style="font-size:12px;color:var(--text2);display:block;margin-bottom:6px">Mot de passe</label>
-        <input type="password" id="auth-password" placeholder="••••••••" style="width:100%;background:var(--surface2);border:1px solid var(--border2);border-radius:8px;padding:10px 12px;color:var(--text);font-family:var(--font);font-size:14px">
+        <input type="password" id="auth-password" placeholder="••••••••" autocomplete="current-password"
+          style="width:100%;background:var(--surface2);border:1px solid var(--border2);border-radius:8px;padding:10px 12px;color:var(--text);font-family:var(--font);font-size:14px;box-sizing:border-box"
+          onkeydown="if(event.key==='Enter') handleAuthSubmit()">
       </div>
-      <button id="auth-submit-btn" onclick="handleAuthSubmit()" style="width:100%;background:var(--blue);color:#fff;border:none;border-radius:8px;padding:12px;font-size:14px;font-weight:600;cursor:pointer;font-family:var(--font)">Se connecter</button>
-      <div style="text-align:center;margin-top:14px;font-size:13px;color:var(--text2)">
-        <span id="auth-toggle-text">Pas encore de compte ?</span>
-        <a href="#" onclick="toggleAuthMode();return false" id="auth-toggle-link" style="color:var(--blue2);text-decoration:none;font-weight:600">Créer un compte</a>
-      </div>
+      <button id="auth-submit-btn" onclick="handleAuthSubmit()" style="width:100%;background:var(--blue);color:#fff;border:none;border-radius:8px;padding:12px;font-size:14px;font-weight:600;cursor:pointer;font-family:var(--font)">Accéder</button>
+      <div style="text-align:center;margin-top:14px;font-size:12px;color:var(--text3)">Accès réservé à l'équipe BONNA TP</div>
     </div>
   </div>
 </div>
@@ -498,14 +493,11 @@ function setSyncStatus(state) {
   }
 }
 
-let authMode = 'login'; // 'login' | 'signup'
-function toggleAuthMode() {
-  authMode = authMode === 'login' ? 'signup' : 'login';
-  document.getElementById('auth-submit-btn').textContent = authMode === 'login' ? 'Se connecter' : 'Créer le compte';
-  document.getElementById('auth-toggle-text').textContent = authMode === 'login' ? 'Pas encore de compte ?' : 'Déjà un compte ?';
-  document.getElementById('auth-toggle-link').textContent = authMode === 'login' ? 'Créer un compte' : 'Se connecter';
-  document.getElementById('auth-error').style.display = 'none';
-}
+// ============================================================
+// AUTHENTIFICATION PAR MOT DE PASSE UNIQUE (partagé équipe)
+// ============================================================
+const APP_PASSWORD = 'bonna2024'; // Mot de passe partagé — modifiable ici
+const AUTH_KEY = 'qm_auth_ok';
 
 function showAuthError(msg) {
   const el = document.getElementById('auth-error');
@@ -513,59 +505,38 @@ function showAuthError(msg) {
   el.style.display = 'block';
 }
 
-async function handleAuthSubmit() {
-  if (!sb) {
-    showAuthError("Supabase n'est pas configuré. Vérifiez SUPABASE_URL et SUPABASE_ANON_KEY.");
+function handleAuthSubmit() {
+  const password = document.getElementById('auth-password').value;
+  if (!password) { showAuthError('Entrez le mot de passe.'); return; }
+  if (password !== APP_PASSWORD) {
+    showAuthError('Mot de passe incorrect.');
+    document.getElementById('auth-password').value = '';
     return;
   }
-  const email = document.getElementById('auth-email').value.trim();
-  const password = document.getElementById('auth-password').value;
-  if (!email || !password) { showAuthError('Email et mot de passe requis.'); return; }
-
-  const btn = document.getElementById('auth-submit-btn');
-  btn.disabled = true;
-  btn.textContent = '...';
-
-  try {
-    if (authMode === 'login') {
-      const { data, error } = await sb.auth.signInWithPassword({ email, password });
-      if (error) throw error;
-      await onAuthReady(data.user);
-    } else {
-      const { data, error } = await sb.auth.signUp({ email, password });
-      if (error) throw error;
-      if (data.user && !data.session) {
-        showAuthError('Compte créé. Si la confirmation par email est activée, vérifiez votre boîte mail avant de vous connecter.');
-        btn.disabled = false;
-        btn.textContent = 'Créer le compte';
-        return;
-      }
-      await onAuthReady(data.user);
-    }
-  } catch (err) {
-    showAuthError(err.message || "Erreur d'authentification.");
-    btn.disabled = false;
-    btn.textContent = authMode === 'login' ? 'Se connecter' : 'Créer le compte';
-  }
+  // Mémoriser la session pour éviter de redemander à chaque visite
+  try { sessionStorage.setItem(AUTH_KEY, '1'); } catch(e) {}
+  enterApp();
 }
 
-async function handleLogout() {
+function enterApp() {
+  document.getElementById('auth-screen').style.display = 'none';
+  document.getElementById('app').style.display = '';
+}
+
+function handleLogout() {
+  try { sessionStorage.removeItem(AUTH_KEY); } catch(e) {}
   if (sb) {
     realtimeChannels.forEach(ch => sb.removeChannel(ch));
     realtimeChannels = [];
-    await sb.auth.signOut();
   }
   currentUser = null;
   document.getElementById('app').style.display = 'none';
   document.getElementById('auth-screen').style.display = 'flex';
-  document.getElementById('auth-email').value = '';
   document.getElementById('auth-password').value = '';
 }
 
 async function onAuthReady(user) {
-  currentUser = user;
-  document.getElementById('auth-screen').style.display = 'none';
-  document.getElementById('app').style.display = '';
+  currentUser = user || { id: 'shared', email: 'equipe@bonna-tp.fr' };
   setSyncStatus('syncing');
   await pullAllFromSupabase();
   subscribeRealtime();
@@ -2381,28 +2352,17 @@ document.getElementById('user-avatar').textContent = DB.settings.userInitials ||
 // INIT
 // ============================================================
 async function initApp() {
-  if (!sb) {
-    // Pas de Supabase configuré -> mode local uniquement, on saute l'écran de login
-    document.getElementById('auth-screen').style.display = 'none';
-    document.getElementById('app').style.display = '';
-    generateNotifications();
-    updateBadges();
-    showPage('dashboard');
-    return;
-  }
-  const { data: { session } } = await sb.auth.getSession();
-  if (session && session.user) {
-    await onAuthReady(session.user);
+  // Vérifier si déjà authentifié cette session
+  let alreadyAuth = false;
+  try { alreadyAuth = sessionStorage.getItem(AUTH_KEY) === '1'; } catch(e) {}
+
+  if (alreadyAuth) {
+    enterApp();
+    await onAuthReady(null);
   } else {
     document.getElementById('auth-screen').style.display = 'flex';
     document.getElementById('app').style.display = 'none';
   }
-  sb.auth.onAuthStateChange((event, session) => {
-    if (event === 'SIGNED_OUT') {
-      document.getElementById('auth-screen').style.display = 'flex';
-      document.getElementById('app').style.display = 'none';
-    }
-  });
 }
 initApp();
 
