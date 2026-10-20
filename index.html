@@ -518,6 +518,7 @@ function handleAuthSubmit() {
   // Mémoriser la session pour éviter de redemander à chaque visite
   try { sessionStorage.setItem(AUTH_KEY, '1'); } catch(e) {}
   enterApp();
+  onAuthReady(null);
 }
 
 function enterApp() {
