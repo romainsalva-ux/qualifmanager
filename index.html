@@ -424,6 +424,8 @@ const R2_ACCESS_KEY_ID = 'ad4e9149ea6f4c7a9ef53a47a33866b3';
 const R2_SECRET_ACCESS_KEY = '8fb35eb985cbe1eeee6c56093398479d77849d28bd3149772b978d65b7c4ff0e';
 const R2_BUCKET = 'qualifmanager-docs';
 const R2_PUBLIC_URL = 'https://pub-5985ab0e232c476594da85f5b258032d.r2.dev';
+// Clé API IA — assemblée au runtime
+function getApiKey() { return localStorage.getItem('qm_apikey') || ''; }
 
 // Upload un fichier vers R2 via l'API S3-compatible
 async function uploadToR2(file, key) {
@@ -538,6 +540,19 @@ function handleLogout() {
 async function onAuthReady(user) {
   currentUser = user || { id: 'shared', email: 'equipe@bonna-tp.fr' };
   setSyncStatus('syncing');
+  // Charger la clé API depuis Supabase (partagée entre tous les utilisateurs)
+  if (sb) {
+    try {
+      const { data: settingsRows } = await sb.from('app_settings').select('key,value').eq('org_id', 'bonna-tp');
+      if (settingsRows) {
+        settingsRows.forEach(row => {
+          if (row.key === 'anthropic_api_key' && row.value) {
+            localStorage.setItem('qm_apikey', row.value);
+          }
+        });
+      }
+    } catch(e) { /* silencieux */ }
+  }
   await pullAllFromSupabase();
   subscribeRealtime();
   setSyncStatus('online');
@@ -938,15 +953,10 @@ function renderAlertes() {
 
   <div style="margin-top:20px" class="card">
     <div class="section-title" style="margin-bottom:4px">🤖 Configuration IA</div>
-    <div style="font-size:12px;color:var(--text3);margin-bottom:14px">La clé API permet à l'IA d'analyser automatiquement vos PDF et photos pour remplir les champs. Elle est stockée uniquement sur cet appareil.</div>
-    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-      <input type="password" id="apikey-input" placeholder="sk-ant-api03-..." value="${localStorage.getItem('qm_apikey')||''}"
-        style="flex:1;min-width:220px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:13px;color:var(--text);outline:none;font-family:var(--mono)">
-      <button class="btn btn-primary btn-sm" onclick="saveApiKey()">Enregistrer</button>
-      ${localStorage.getItem('qm_apikey') ? `<button class="btn btn-ghost btn-sm" onclick="deleteApiKey()" style="color:var(--red2)">Supprimer</button>` : ''}
+    <div style="background:rgba(52,199,89,0.1);border:1px solid rgba(52,199,89,0.3);border-radius:8px;padding:10px 14px;font-size:13px;color:var(--green2)">
+      ✅ Analyse IA active — disponible pour toute l'équipe
     </div>
-    <div id="apikey-status" style="margin-top:10px;font-size:12px;color:var(--green2);display:${localStorage.getItem('qm_apikey')?'block':'none'}">✅ Clé API configurée — l'analyse IA est active</div>
-    <div style="margin-top:10px;font-size:12px;color:var(--text3)">Obtenez une clé sur <a href="https://console.anthropic.com" target="_blank" style="color:var(--blue2)">console.anthropic.com</a> → API Keys → Create Key</div>
+    <div style="margin-top:10px;font-size:12px;color:var(--text3)">Analysez vos documents PDF, photos et fichiers Excel depuis la section Documents.</div>
   </div>`;
 }
 
@@ -1627,7 +1637,7 @@ function openDocFromQualif(docId) {
 }
 
 async function analyzeDocumentWithAI(docId) {
-  const apiKey = localStorage.getItem('qm_apikey') || '';
+  const apiKey = getApiKey();
   if (!apiKey) {
     alert('Clé API non configurée. Allez dans Alertes → Configuration IA.');
     return;
@@ -1851,7 +1861,7 @@ function applyMultiDocImport(parsed, docId) {
 }
 
 async function analyzeExcelWithAI(docId) {
-  const apiKey = localStorage.getItem('qm_apikey') || '';
+  const apiKey = getApiKey();
   if (!apiKey) {
     alert('Clé API non configurée. Allez dans Alertes → Configuration IA pour la saisir.');
     return;
@@ -2124,7 +2134,7 @@ function handleFileScan(event, target) {
 }
 
 async function analyzeWithClaude(base64, mediaType, target) {
-  const apiKey = localStorage.getItem('qm_apikey') || '';
+  const apiKey = getApiKey();
   if (!apiKey) {
     const resultEl = document.getElementById('scan-result-' + target);
     if (resultEl) {
