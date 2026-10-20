@@ -568,11 +568,6 @@ async function onAuthReady(user) {
   document.getElementById('app').style.display = '';
   setSyncStatus('syncing');
   await pullAllFromSupabase();
-  // Charger la clé API partagée depuis Supabase
-  if (sb) {
-    const { data } = await sb.from('app_settings').select('value').eq('key', 'anthropic_api_key').eq('org_id', 'bonna-tp').single();
-    if (data?.value) localStorage.setItem('qm_apikey', data.value);
-  }
   subscribeRealtime();
   setSyncStatus('online');
   generateNotifications();
@@ -580,25 +575,28 @@ async function onAuthReady(user) {
   showPage('dashboard');
 }
 
+// Table Supabase correspondant à chaque clé DB locale (schéma plat)
+const TABLE_MAP = { materiel: 'materiel', personnel: 'personnel', qualifications: 'qualifications', documents: 'documents' };
+
 // Pull toutes les données depuis Supabase au démarrage / login
 async function pullAllFromSupabase() {
   if (!sb || !currentUser) return;
   try {
     const [matRes, persRes, qualRes, docRes] = await Promise.all([
-      sb.from('equipements').select('*').eq('org_id', 'bonna-tp'),
-      sb.from('personnel').select('*').eq('org_id', 'bonna-tp'),
-      sb.from('qualifications').select('*').eq('org_id', 'bonna-tp'),
-      sb.from('documents').select('*').eq('org_id', 'bonna-tp'),
+      sb.from('materiel').select('*').order('created_at'),
+      sb.from('personnel').select('*').order('created_at'),
+      sb.from('qualifications').select('*').order('created_at'),
+      sb.from('documents').select('*').order('created_at'),
     ]);
     if (matRes.error) throw matRes.error;
     if (persRes.error) throw persRes.error;
     if (qualRes.error) throw qualRes.error;
     if (docRes.error) throw docRes.error;
 
-    DB.materiel = (matRes.data || []).map(r => ({ ...r.data, id: r.id }));
-    DB.personnel = (persRes.data || []).map(r => ({ ...r.data, id: r.id }));
-    DB.qualifications = (qualRes.data || []).map(r => ({ ...r.data, id: r.id }));
-    DB.documents = (docRes.data || []).map(r => ({ ...r.data, id: r.id }));
+    DB.materiel = matRes.data || [];
+    DB.personnel = persRes.data || [];
+    DB.qualifications = qualRes.data || [];
+    DB.documents = docRes.data || [];
 
     localStorage.setItem('qm_materiel', JSON.stringify(DB.materiel));
     localStorage.setItem('qm_personnel', JSON.stringify(DB.personnel));
@@ -610,9 +608,6 @@ async function pullAllFromSupabase() {
   }
 }
 
-// Table Supabase correspondant à chaque clé DB locale
-const TABLE_MAP = { materiel: 'equipements', personnel: 'personnel', qualifications: 'qualifications', documents: 'documents' };
-
 // Upsert un item unique vers Supabase (appelé après chaque ajout/édition)
 async function syncUpsert(key, item) {
   if (!sb || !currentUser) return;
@@ -620,8 +615,7 @@ async function syncUpsert(key, item) {
   if (!table) return;
   setSyncStatus('syncing');
   try {
-    const { id, ...rest } = item;
-    const { error } = await sb.from(table).upsert({ id, data: rest, org_id: 'bonna-tp', updated_at: new Date().toISOString() });
+    const { error } = await sb.from(table).upsert(item, { onConflict: 'id' });
     if (error) throw error;
     setSyncStatus('online');
   } catch (err) {
@@ -637,7 +631,7 @@ async function syncDelete(key, id) {
   if (!table) return;
   setSyncStatus('syncing');
   try {
-    const { error } = await sb.from(table).delete().eq('id', id).eq('org_id', 'bonna-tp');
+    const { error } = await sb.from(table).delete().eq('id', id);
     if (error) throw error;
     setSyncStatus('online');
   } catch (err) {
@@ -651,7 +645,7 @@ function subscribeRealtime() {
   if (!sb || !currentUser) return;
   Object.entries(TABLE_MAP).forEach(([key, table]) => {
     const channel = sb.channel('rt-' + table)
-      .on('postgres_changes', { event: '*', schema: 'public', table, filter: `org_id=eq.bonna-tp` }, (payload) => {
+      .on('postgres_changes', { event: '*', schema: 'public', table }, (payload) => {
         applyRealtimeChange(key, payload);
       })
       .subscribe();
@@ -665,14 +659,13 @@ function applyRealtimeChange(key, payload) {
     const idx = arr.findIndex(x => x.id === payload.old.id);
     if (idx !== -1) arr.splice(idx, 1);
   } else {
-    const item = { ...payload.new.data, id: payload.new.id };
+    const item = payload.new;
     const idx = arr.findIndex(x => x.id === item.id);
     if (idx !== -1) arr[idx] = item; else arr.push(item);
   }
   localStorage.setItem('qm_' + key, JSON.stringify(arr));
   generateNotifications();
   updateBadges();
-  // Re-render la page courante pour refléter le changement
   if (typeof currentPage !== 'undefined' && currentPage) showPage(currentPage);
 }
 
