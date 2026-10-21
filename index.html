@@ -1333,7 +1333,21 @@ function openDetailPersonnel(id) {
   ${qualifs.length ? `<div class="table-wrap"><table>
     <thead><tr><th>Qualification / Diplôme</th><th>Type</th><th>Validité</th><th>Statut</th><th>Organisme</th><th>Actions</th></tr></thead>
     <tbody>${qRows}</tbody>
-  </table></div>` : '<div style="color:var(--text3);font-size:13px;padding:16px 0">Aucune qualification enregistrée</div>'}`;
+  </table></div>` : '<div style="color:var(--text3);font-size:13px;padding:16px 0">Aucune qualification enregistrée</div>'}
+  ${(()=>{
+    const docsLies = DB.documents.filter(d=>d.refId===id);
+    if (!docsLies.length) return '';
+    const docItems = docsLies.map(d=>{
+      const fileUrl = d.url||d.dataUrl||null;
+      return `<div class="doc-item" onclick="${fileUrl?`openDocFromQualif('${d.id}')`:'void(0)'}" style="cursor:${fileUrl?'pointer':'default'}">
+        <span class="doc-icon">${d.type==='pdf'?'📕':d.type==='image'?'🖼️':'📄'}</span>
+        <span class="doc-name">${d.nom}</span>
+        <span class="doc-size">${d.date||''}</span>
+        ${fileUrl?`<span style="color:var(--blue2);font-size:11px">👁 Ouvrir</span>`:'<span style="color:var(--text3);font-size:11px">⏳</span>'}
+      </div>`;
+    }).join('');
+    return `<div class="section-title" style="margin-top:18px">📁 Documents liés (${docsLies.length})</div><div>${docItems}</div>`;
+  })()}`;
   document.getElementById('detail-footer').innerHTML = `
     <button class="btn btn-ghost" onclick="closeModal('modal-detail')">Fermer</button>
     <button class="btn btn-ghost" onclick="closeModal('modal-detail');openAddPersonnel('${id}')">✏️ Modifier</button>
@@ -1641,16 +1655,16 @@ function handleAttachNewDoc(event, qualifId, personnelId) {
   else showPage('diplomes');
 }
 
+// Ouvrir un document depuis n'importe quelle interface (fiche, tableau, page Documents)
 function openDocFromQualif(docId) {
   const d = DB.documents.find(x=>x.id===docId);
   if (!d) return;
   const fileUrl = d.url || d.dataUrl || null;
-  if (!fileUrl) { alert('Document non disponible'); return; }
-  if (d.type === 'image') {
-    previewDoc(docId);
-  } else {
-    window.open(fileUrl, '_blank');
+  if (!fileUrl) {
+    showToast('⏳ Document en cours d\'upload, réessayez dans quelques secondes', 'warning');
+    return;
   }
+  previewDoc(docId); // previewDoc gère images ET PDF via window.open
 }
 
 async function analyzeDocumentWithAI(docId) {
@@ -2181,6 +2195,11 @@ async function handleScanForEntity(event, entityType, entityId, qualifId) {
     doc.dataUrl = fileUrl;
   }
 
+  // Sauvegarder IMMÉDIATEMENT après l'upload (avant l'IA) → visible dans Documents tout de suite
+  DB.documents.push(doc);
+  save('documents');
+  syncUpsert('documents', doc);
+
   // 2. Analyser avec l'IA
   resultEl.innerHTML = `<div style="text-align:center;padding:16px;color:var(--text2)"><span class="spinner"></span> L'IA analyse le document...</div>`;
 
@@ -2237,19 +2256,10 @@ Analyse ce document et retourne UNIQUEMENT ce JSON (sans markdown) :
     const fb=text.indexOf('{'), lb=text.lastIndexOf('}');
     if(fb!==-1&&lb!==-1) text=text.substring(fb,lb+1);
     const parsed = JSON.parse(text);
-
-    // Sauvegarder le doc dans DB avant d'afficher la preview
-    DB.documents.push(doc);
-    save('documents');
-    syncUpsert('documents', doc);
-
     renderScanEntityPreview(parsed, doc, entityType, entityId, qualifId, resultEl);
   } catch(e) {
-    // Sauvegarder quand même le doc même si l'IA échoue
-    DB.documents.push(doc);
-    save('documents');
-    syncUpsert('documents', doc);
-    resultEl.innerHTML = `<div style="color:var(--amber2);padding:12px;font-size:13px;border:1px solid rgba(255,149,0,0.3);border-radius:8px;margin-bottom:8px">⚠️ Analyse IA impossible : ${e.message}<br>Le document a été sauvegardé mais non classé automatiquement.</div>`;
+    // Doc déjà sauvegardé avant l'appel IA — juste afficher l'erreur
+    resultEl.innerHTML = `<div style="color:var(--amber2);padding:12px;font-size:13px;border:1px solid rgba(255,149,0,0.3);border-radius:8px;margin-bottom:8px">⚠️ Analyse IA impossible : ${e.message}<br>Le document est sauvegardé — vous pouvez l'analyser manuellement depuis <strong>Documents</strong>.</div>`;
   }
 }
 
@@ -2375,21 +2385,42 @@ function applyScanEntityImport(parsed, docId, entityType, entityId, qualifId) {
     }
   });
 
-  // Mettre à jour le document avec le bon refId/refNom
+  // Mettre à jour le document avec le bon refId/refNom et re-sauvegarder
   if (doc) { save('documents'); syncUpsert('documents', doc); }
   save('materiel'); save('qualifications');
+  generateNotifications();
+  updateBadges();
 
   closeModal('modal-main');
-  const msgs = ['✅ Import terminé :'];
+
+  // Toast non-bloquant au lieu d'un alert()
+  const msgs = [];
   if (created) msgs.push(`${created} créé(s)`);
   if (updated) msgs.push(`${updated} mis à jour`);
-  if (skipped) msgs.push(`${skipped} ignoré(s) (agent non trouvé)`);
-  alert(msgs.join('\n'));
+  if (skipped) msgs.push(`${skipped} ignoré(s)`);
+  showToast('✅ Import terminé' + (msgs.length ? ' : ' + msgs.join(', ') : ''), 'success');
 
-  // Retourner à la bonne fiche
+  // Rafraîchir la fiche courante
   if (entityType==='personnel' && entityId) openDetailPersonnel(entityId);
   else if (entityType==='materiel' && entityId) openDetailMateriel(entityId);
   else showPage('documents');
+}
+
+// Notification toast légère (non-bloquante)
+function showToast(msg, type='info') {
+  let toast = document.getElementById('qm-toast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'qm-toast';
+    toast.style.cssText = 'position:fixed;bottom:max(24px,env(safe-area-inset-bottom,0px));left:50%;transform:translateX(-50%);z-index:9999;padding:10px 20px;border-radius:20px;font-size:13px;font-weight:600;color:#fff;pointer-events:none;transition:opacity .3s;white-space:nowrap;box-shadow:0 4px 16px rgba(0,0,0,.25)';
+    document.body.appendChild(toast);
+  }
+  const colors = { success:'#16a34a', error:'#dc2626', info:'#2563eb', warning:'#d97706' };
+  toast.style.background = colors[type] || colors.info;
+  toast.textContent = msg;
+  toast.style.opacity = '1';
+  clearTimeout(toast._timer);
+  toast._timer = setTimeout(() => { toast.style.opacity = '0'; }, 3000);
 }
 
 // ============================================================
