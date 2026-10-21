@@ -652,6 +652,11 @@ async function syncDelete(key, id) {
 // Abonnement temps réel : répercute les changements faits sur d'autres appareils
 function subscribeRealtime() {
   if (!sb || !currentUser) return;
+  // Éviter un double abonnement (onAuthReady peut se déclencher plusieurs fois)
+  if (realtimeChannels.length) {
+    realtimeChannels.forEach(ch => { try { sb.removeChannel(ch); } catch(e) {} });
+    realtimeChannels = [];
+  }
   Object.entries(TABLE_MAP).forEach(([key, table]) => {
     const channel = sb.channel('rt-' + table)
       .on('postgres_changes', { event: '*', schema: 'public', table, filter: 'org_id=eq.bonna-tp' }, (payload) => {
