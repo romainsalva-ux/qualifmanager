@@ -14,6 +14,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="QualifManager">
+<link rel="icon" type="image/png" href="/favicon.png">
 <link rel="apple-touch-icon" href="/icon-192.png">
 <link rel="apple-touch-startup-image" href="/icon-512.png">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -57,7 +58,8 @@ body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellips
 .content{padding:28px 28px 60px;flex:1}
 
 /* SIDEBAR */
-.logo{padding:24px 20px 20px;border-bottom:1px solid var(--border)}
+.logo{padding:20px 20px 18px;border-bottom:1px solid var(--border)}
+.logo-img{width:56px;height:56px;object-fit:contain;display:block;margin-bottom:10px}
 .logo-title{font-size:18px;font-weight:700;color:var(--text);letter-spacing:-0.3px}
 .logo-sub{font-size:11px;color:var(--text3);margin-top:2px;font-family:var(--mono)}
 .nav{padding:12px 10px;flex:1;overflow-y:auto}
@@ -274,7 +276,7 @@ tr:hover td{background:rgba(255,255,255,0.02)}
 <div id="auth-screen" style="position:fixed;inset:0;background:var(--navy);display:flex;align-items:center;justify-content:center;z-index:1000;padding:20px">
   <div style="width:100%;max-width:360px">
     <div style="text-align:center;margin-bottom:28px">
-      <div style="font-size:36px;margin-bottom:8px">🛡️</div>
+      <img src="/logo.png" alt="Bonna TP" style="width:96px;height:96px;object-fit:contain;margin:0 auto 10px;display:block">
       <div style="font-size:22px;font-weight:700;color:var(--text)">QualifManager</div>
       <div style="font-size:13px;color:var(--text2);margin-top:4px">BONNA TP — Gestion des qualifications</div>
     </div>
@@ -298,7 +300,7 @@ tr:hover td{background:rgba(255,255,255,0.02)}
   <!-- SIDEBAR -->
   <aside class="sidebar" id="sidebar">
     <div class="logo">
-      <div style="font-size:24px;margin-bottom:6px">🛡️</div>
+      <img src="/logo.png" alt="Bonna TP" class="logo-img">
       <div class="logo-title">QualifManager</div>
       <div class="logo-sub">v2.0 • multi-services</div>
     </div>
