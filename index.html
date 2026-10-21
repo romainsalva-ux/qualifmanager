@@ -583,9 +583,22 @@ async function pullAllFromSupabase() {
     // materiel : colonnes plates
     DB.materiel = matRes.data || [];
     // personnel, qualifications, documents : données dans colonne jsonb "data"
-    DB.personnel = (persRes.data || []).map(r => r.data && typeof r.data === 'object' ? r.data : r);
-    DB.qualifications = (qualRes.data || []).map(r => r.data && typeof r.data === 'object' ? r.data : r);
-    DB.documents = (docRes.data || []).map(r => r.data && typeof r.data === 'object' ? r.data : r);
+    // On s'assure que chaque item a bien un id (fallback sur l'id de la ligne Supabase)
+    DB.personnel = (persRes.data || []).map(r => {
+      const item = r.data && typeof r.data === 'object' ? r.data : r;
+      if (!item.id) item.id = r.id;
+      return item;
+    });
+    DB.qualifications = (qualRes.data || []).map(r => {
+      const item = r.data && typeof r.data === 'object' ? r.data : r;
+      if (!item.id) item.id = r.id;
+      return item;
+    });
+    DB.documents = (docRes.data || []).map(r => {
+      const item = r.data && typeof r.data === 'object' ? r.data : r;
+      if (!item.id) item.id = r.id;
+      return item;
+    });
 
     localStorage.setItem('qm_materiel', JSON.stringify(DB.materiel));
     localStorage.setItem('qm_personnel', JSON.stringify(DB.personnel));
