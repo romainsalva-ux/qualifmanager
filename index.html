@@ -1171,9 +1171,10 @@ function openDetailMateriel(id) {
       ${fileUrl ? `<span style="color:var(--blue2);font-size:11px">👁 Ouvrir</span>` : ''}
     </div>`;
   }).join('') : '<div style="color:var(--text3);font-size:13px">Aucun document lié</div>'}
-  <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
-    <button class="btn btn-ghost btn-sm" onclick="openUploadDoc('${id}')">📎 Importer un nouveau</button>
-    ${DB.documents.filter(d=>d.refId!==id).length ? `<button class="btn btn-ghost btn-sm" onclick="pickExistingDocForMateriel('${id}')">🔗 Lier un document existant</button>` : ''}
+  <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+    <button class="btn btn-primary btn-sm" onclick="openScanDocForEntity('materiel','${id}')">📷 Scanner (analyse IA)</button>
+    <button class="btn btn-ghost btn-sm" onclick="openUploadDoc('${id}')">📎 Importer manuel</button>
+    ${DB.documents.filter(d=>d.refId!==id).length ? `<button class="btn btn-ghost btn-sm" onclick="pickExistingDocForMateriel('${id}')">🔗 Lier existant</button>` : ''}
   </div>`;
   document.getElementById('detail-footer').innerHTML = `
     <button class="btn btn-ghost" onclick="closeModal('modal-detail')">Fermer</button>
@@ -1309,6 +1310,7 @@ function openDetailPersonnel(id) {
       <td>${badgeFor(q.dateValidite)}</td>
       <td>${q.organisme||'—'}</td>
       <td onclick="event.stopPropagation()" style="white-space:nowrap">
+        <button class="btn btn-ghost btn-sm" title="Renouveler le document via IA" onclick="openScanDocForEntity('qualif','${id}','${q.id}')">📷</button>
         <button class="btn btn-ghost btn-sm" onclick="openAddQualif('${id}','${q.id}')">✏️</button>
         <button class="btn btn-danger btn-sm" onclick="deleteQualif('${q.id}','${id}')">🗑</button>
       </td>
@@ -1321,9 +1323,12 @@ function openDetailPersonnel(id) {
     <span class="badge badge-blue">💼 ${p.poste||'—'}</span>
     <span class="badge badge-gray">🏢 ${p.service||'—'}</span>
   </div>
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
     <div class="section-title" style="margin-bottom:0">Qualifications & Diplômes (${qualifs.length})</div>
-    <button class="btn btn-primary btn-sm" onclick="closeModal('modal-detail');openAddQualif('${id}')">➕ Ajouter</button>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-primary btn-sm" onclick="openScanDocForEntity('personnel','${id}')">📷 Scanner (IA)</button>
+      <button class="btn btn-ghost btn-sm" onclick="closeModal('modal-detail');openAddQualif('${id}')">➕ Ajouter</button>
+    </div>
   </div>
   ${qualifs.length ? `<div class="table-wrap"><table>
     <thead><tr><th>Qualification / Diplôme</th><th>Type</th><th>Validité</th><th>Statut</th><th>Organisme</th><th>Actions</th></tr></thead>
@@ -2111,6 +2116,280 @@ function previewDoc(id) {
   ${previewHtml}`;
   document.getElementById('detail-footer').innerHTML = `<button class="btn btn-ghost" onclick="closeModal('modal-detail')">Fermer</button>`;
   openModal('modal-detail');
+}
+
+// ============================================================
+// SCAN DOCUMENT DEPUIS UNE FICHE (personnel / matériel / qualification)
+// ============================================================
+
+// Ouvre le modal de scan depuis n'importe quelle fiche
+// entityType : 'personnel' | 'materiel' | 'qualif'
+// entityId   : id de l'entité parente
+// qualifId   : (optionnel) id d'une qualification spécifique à mettre à jour
+function openScanDocForEntity(entityType, entityId, qualifId) {
+  const inputId = 'scan-entity-file-' + Date.now();
+  let titre = '📷 Scanner / importer un document';
+  let hint = 'Photo, PDF — L\'IA lit et classe automatiquement';
+  if (entityType === 'personnel') { const p = DB.personnel.find(x=>x.id===entityId); titre = `📷 Scanner un document — ${p?.nom||''}`; }
+  if (entityType === 'materiel')  { const m = DB.materiel.find(x=>x.id===entityId); titre = `📷 Scanner un document — ${m?.nom||''}`; }
+  if (entityType === 'qualif') { const q = DB.qualifications.find(x=>x.id===qualifId); titre = `📷 Mettre à jour — ${q?.nom||''}`; }
+
+  document.getElementById('modal-title').textContent = titre;
+  document.getElementById('modal-body').innerHTML = `
+    <div class="scan-zone" onclick="document.getElementById('${inputId}').click()" style="margin-bottom:0">
+      <span class="scan-zone-icon">📂</span>
+      <p>Sélectionner ou photographier le document</p>
+      <p class="scan-hint">${hint}</p>
+      <span class="ai-badge">✨ Analyse IA automatique</span>
+    </div>
+    <input type="file" id="${inputId}" accept="image/*,.pdf" style="display:none" capture="environment"
+      onchange="handleScanForEntity(event,'${entityType}','${entityId||''}','${qualifId||''}')">
+    <div id="scan-entity-result" style="margin-top:12px"></div>`;
+  document.getElementById('modal-footer').innerHTML = `<button class="btn btn-ghost" onclick="closeModal('modal-main')">Annuler</button>`;
+  openModal('modal-main');
+}
+
+async function handleScanForEntity(event, entityType, entityId, qualifId) {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  const resultEl = document.getElementById('scan-entity-result');
+  resultEl.innerHTML = `<div style="text-align:center;padding:16px;color:var(--text2)"><span class="spinner"></span> Upload en cours...</div>`;
+
+  const apiKey = getApiKey();
+  if (!apiKey) {
+    resultEl.innerHTML = `<div style="color:var(--amber2);padding:10px;font-size:13px">⚠️ Clé API non configurée. Allez dans Alertes → Configuration IA.</div>`;
+    return;
+  }
+
+  // 1. Upload vers R2 immédiatement
+  const ext = file.name.split('.').pop().toLowerCase();
+  const type = ['jpg','jpeg','png','webp'].includes(ext)?'image':'pdf';
+  const docId = uid();
+  const key = `${docId}-${file.name.replace(/[^a-zA-Z0-9._-]/g,'_')}`;
+  const refItem = entityId ? (DB.materiel.find(x=>x.id===entityId)||DB.personnel.find(x=>x.id===entityId)) : null;
+  const doc = { id:docId, nom:file.name, type, refId:entityId||null, refNom:refItem?.nom||null, date:new Date().toLocaleDateString('fr-FR'), size:file.size, key };
+
+  resultEl.innerHTML = `<div style="text-align:center;padding:16px;color:var(--text2)"><span class="spinner"></span> Stockage du document...</div>`;
+  let fileUrl = null;
+  try {
+    fileUrl = await uploadToR2(file, key);
+    doc.url = fileUrl;
+  } catch(e) {
+    // Fallback base64
+    fileUrl = await new Promise(res => { const fr=new FileReader(); fr.onload=e=>res(e.target.result); fr.readAsDataURL(file); });
+    doc.dataUrl = fileUrl;
+  }
+
+  // 2. Analyser avec l'IA
+  resultEl.innerHTML = `<div style="text-align:center;padding:16px;color:var(--text2)"><span class="spinner"></span> L'IA analyse le document...</div>`;
+
+  // Contexte selon l'entité
+  const personnelCible = entityType==='personnel' ? DB.personnel.find(x=>x.id===entityId) : null;
+  const materielCible = entityType==='materiel' ? DB.materiel.find(x=>x.id===entityId) : null;
+  const qualifCible = qualifId ? DB.qualifications.find(x=>x.id===qualifId) : null;
+
+  const existingMateriel = DB.materiel.map(m=>`ID:${m.id} | ${m.nom} | ref:${m.ref||'?'} | cat:${m.categorie}`).join('\n');
+  const existingPersonnel = DB.personnel.map(p=>`ID:${p.id} | ${p.nom}`).join('\n');
+  // Qualifications existantes de la personne cible (pour détecter les doublons)
+  const qualifsDeLaPersonne = personnelCible
+    ? DB.qualifications.filter(q=>q.personnelId===entityId).map(q=>`QUALIF_ID:${q.id} | ${q.nom} | type:${q.type} | validité:${q.dateValidite}`).join('\n')
+    : '';
+
+  let contexte = '';
+  if (personnelCible) contexte = `\n\nCE DOCUMENT APPARTIENT À : ${personnelCible.nom} (ID:${entityId})\nSes qualifications existantes :\n${qualifsDeLaPersonne||'Aucune'}\nPOUR TOUTE QUALIFICATION TROUVÉE : assigne-la à cette personne (matchPersonnelId="${entityId}"). Si une qualification du même type ET même nom existe déjà pour cette personne, indique action:"update" et matchQualifId avec son ID.`;
+  if (materielCible) contexte = `\n\nCE DOCUMENT CONCERNE LE MATÉRIEL : ${materielCible.nom} | ref:${materielCible.ref||'?'} (ID:${entityId})\nPOUR TOUT MATÉRIEL TROUVÉ : si c'est le même équipement, indique action:"update" et matchId="${entityId}".`;
+  if (qualifCible) contexte = `\n\nCE DOCUMENT MET À JOUR LA QUALIFICATION : ${qualifCible.nom} | type:${qualifCible.type} | agent ID:${qualifCible.personnelId}\nIndique action:"update", matchPersonnelId="${qualifCible.personnelId}", matchQualifId="${qualifCible.id}".`;
+
+  const systemPrompt = `Tu es un assistant expert en gestion de matériel de plongée professionnelle et BTP (BONNA TP).
+Équipements existants :\n${existingMateriel||'Aucun'}
+Personnel existant :\n${existingPersonnel||'Aucun'}
+${contexte}
+
+Analyse ce document et retourne UNIQUEMENT ce JSON (sans markdown) :
+{
+  "materiel": [{"action":"update"|"create","matchId":"ID si update sinon null","nom":"...","ref":"...","categorie":"Bouteille|Plongée|EPI|Véhicule|Engin|Bateau|Autre","souscat":"...","dateValidite":"YYYY-MM-DD ou illimite","organisme":"...","notes":""}],
+  "qualifications": [{"action":"update"|"create","matchPersonnelId":"ID ou null","matchQualifId":"ID qualif existante si doublon sinon null","personnelNom":"...","nom":"...","type":"Permis / Habilitation|Diplôme|Aptitude médicale|Formation","dateValidite":"YYYY-MM-DD ou illimite","organisme":"...","notes":""}]
+}`;
+
+  try {
+    const base64 = fileUrl && !fileUrl.startsWith('data:')
+      ? await fetch(fileUrl).then(r=>r.blob()).then(b=>new Promise(res=>{const fr=new FileReader();fr.onload=e=>res(e.target.result.split(',')[1]);fr.readAsDataURL(b);}))
+      : fileUrl?.split(',')[1] || null;
+
+    if (!base64) throw new Error('Impossible de lire le fichier');
+
+    const isPdf = type === 'pdf';
+    const mediaType = isPdf ? 'application/pdf' : (file.type||'image/jpeg');
+    const contentBlock = isPdf
+      ? { type:'document', source:{type:'base64',media_type:'application/pdf',data:base64} }
+      : { type:'image', source:{type:'base64',media_type:mediaType,data:base64} };
+
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method:'POST',
+      headers:{'Content-Type':'application/json','x-api-key':apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:4000,messages:[{role:'user',content:[contentBlock,{type:'text',text:systemPrompt}]}]})
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error.message);
+    let text = data.content?.[0]?.text||'';
+    text = text.replace(/```json|```/g,'').trim();
+    const fb=text.indexOf('{'), lb=text.lastIndexOf('}');
+    if(fb!==-1&&lb!==-1) text=text.substring(fb,lb+1);
+    const parsed = JSON.parse(text);
+
+    // Sauvegarder le doc dans DB avant d'afficher la preview
+    DB.documents.push(doc);
+    save('documents');
+    syncUpsert('documents', doc);
+
+    renderScanEntityPreview(parsed, doc, entityType, entityId, qualifId, resultEl);
+  } catch(e) {
+    // Sauvegarder quand même le doc même si l'IA échoue
+    DB.documents.push(doc);
+    save('documents');
+    syncUpsert('documents', doc);
+    resultEl.innerHTML = `<div style="color:var(--amber2);padding:12px;font-size:13px;border:1px solid rgba(255,149,0,0.3);border-radius:8px;margin-bottom:8px">⚠️ Analyse IA impossible : ${e.message}<br>Le document a été sauvegardé mais non classé automatiquement.</div>`;
+  }
+}
+
+function renderScanEntityPreview(parsed, doc, entityType, entityId, qualifId, resultEl) {
+  const materiel = (parsed.materiel||[]).filter(x=>x.nom);
+  const qualifs = (parsed.qualifications||[]).filter(x=>x.nom);
+  const total = materiel.length + qualifs.length;
+
+  if (!total) {
+    resultEl.innerHTML = `<div style="color:var(--amber2);padding:12px;font-size:13px;border:1px solid rgba(255,149,0,0.3);border-radius:8px">⚠️ Aucun élément identifiable. Le document a été sauvegardé — vous pouvez l'analyser manuellement depuis Documents.</div>`;
+    return;
+  }
+
+  const matRows = materiel.map(item => {
+    const existing = item.matchId ? DB.materiel.find(m=>m.id===item.matchId) : null;
+    const badge = item.action==='update'
+      ? `<span style="background:rgba(251,191,36,0.15);color:var(--amber2);padding:2px 8px;border-radius:12px;font-size:11px">✏️ Mise à jour</span>`
+      : `<span style="background:rgba(34,197,94,0.15);color:var(--green2);padding:2px 8px;border-radius:12px;font-size:11px">➕ Nouveau</span>`;
+    return `<div style="border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:6px;background:var(--surface2)">
+      <div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="font-size:13px;font-weight:600">${item.nom}</span>${badge}</div>
+      <div style="font-size:11px;color:var(--text3);display:grid;grid-template-columns:1fr 1fr;gap:2px">
+        <div>Réf : ${item.ref||'—'}</div><div>Cat : ${item.categorie||'—'}</div>
+        <div>Validité : ${item.dateValidite==='illimite'?'♾️':item.dateValidite||'—'}</div><div>Organisme : ${item.organisme||'—'}</div>
+        ${existing?`<div style="grid-column:1/-1;color:var(--amber2);font-size:11px">Remplace : ${existing.nom} (${fmtDate(existing.dateValidite)})</div>`:''}
+      </div></div>`;
+  }).join('');
+
+  const qualifRows = qualifs.map(item => {
+    const p = item.matchPersonnelId ? DB.personnel.find(x=>x.id===item.matchPersonnelId) : null;
+    const existQ = item.matchQualifId ? DB.qualifications.find(x=>x.id===item.matchQualifId) : null;
+    const badge = (item.action==='update'||existQ)
+      ? `<span style="background:rgba(251,191,36,0.15);color:var(--amber2);padding:2px 8px;border-radius:12px;font-size:11px">✏️ Mise à jour</span>`
+      : `<span style="background:rgba(139,92,246,0.15);color:#a78bfa;padding:2px 8px;border-radius:12px;font-size:11px">📋 Nouvelle</span>`;
+    return `<div style="border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:6px;background:var(--surface2)">
+      <div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="font-size:13px;font-weight:600">${item.nom}</span>${badge}</div>
+      <div style="font-size:11px;color:var(--text3);display:grid;grid-template-columns:1fr 1fr;gap:2px">
+        <div>Agent : ${p?.nom||item.personnelNom||'?'}</div><div>Type : ${item.type||'—'}</div>
+        <div>Validité : ${item.dateValidite==='illimite'?'♾️':item.dateValidite||'—'}</div><div>Organisme : ${item.organisme||'—'}</div>
+        ${existQ?`<div style="grid-column:1/-1;color:var(--amber2);font-size:11px">Remplace : ${existQ.nom} (${fmtDate(existQ.dateValidite)})</div>`:''}
+        ${!p&&item.personnelNom?`<div style="grid-column:1/-1;color:var(--red2);font-size:11px">⚠️ Agent "${item.personnelNom}" non trouvé — sera ignoré</div>`:''}
+      </div></div>`;
+  }).join('');
+
+  const parsedStr = JSON.stringify(parsed).replace(/'/g,"&#39;");
+  const docIdStr = doc.id;
+  const eidStr = entityId||'';
+  const etStr = entityType;
+  const qidStr = qualifId||'';
+
+  resultEl.innerHTML = `
+    <div style="border:1px solid rgba(34,197,94,0.3);border-radius:10px;padding:14px;background:rgba(34,197,94,0.05)">
+      <div style="font-size:13px;font-weight:600;margin-bottom:10px;color:var(--green2)">✅ ${total} élément(s) détecté(s)</div>
+      ${materiel.length?`<div style="font-size:11px;color:var(--text3);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">Matériel (${materiel.length})</div>${matRows}`:''}
+      ${qualifs.length?`<div style="font-size:11px;color:var(--text3);margin:8px 0 6px;text-transform:uppercase;letter-spacing:.5px">Qualifications (${qualifs.length})</div>${qualifRows}`:''}
+      <div style="display:flex;gap:8px;margin-top:12px">
+        <button class="btn btn-primary" style="flex:1" onclick='applyScanEntityImport(${parsedStr},"${docIdStr}","${etStr}","${eidStr}","${qidStr}")'>✅ Importer</button>
+        <button class="btn btn-ghost" onclick="closeModal('modal-main')">Ignorer</button>
+      </div>
+    </div>`;
+}
+
+function applyScanEntityImport(parsed, docId, entityType, entityId, qualifId) {
+  const materiel = (parsed.materiel||[]).filter(x=>x.nom);
+  const qualifs = (parsed.qualifications||[]).filter(x=>x.nom);
+  const doc = DB.documents.find(x=>x.id===docId);
+  let created=0, updated=0, skipped=0;
+
+  materiel.forEach(item => {
+    const data = {nom:item.nom||'Sans nom',ref:item.ref||'',categorie:item.categorie||'Autre',souscat:item.souscat||'',dateValidite:item.dateValidite||'',organisme:item.organisme||'',notes:item.notes||''};
+    if (item.action==='update' && item.matchId) {
+      const idx = DB.materiel.findIndex(m=>m.id===item.matchId);
+      if (idx>=0) {
+        DB.materiel[idx] = {...DB.materiel[idx],...data};
+        // Attacher le nouveau document au matériel (remplace l'ancien lien)
+        if (doc) { doc.refId=item.matchId; doc.refNom=DB.materiel[idx].nom; }
+        syncUpsert('materiel', DB.materiel[idx]);
+        updated++;
+      }
+    } else {
+      const newItem = {id:uid(),...data};
+      DB.materiel.push(newItem);
+      if (doc) { doc.refId=newItem.id; doc.refNom=newItem.nom; }
+      syncUpsert('materiel', newItem);
+      created++;
+    }
+  });
+
+  qualifs.forEach(item => {
+    const personnelId = item.matchPersonnelId || null;
+    if (!personnelId) { skipped++; return; }
+    const data = {nom:item.nom||'Sans nom',type:item.type||'Permis / Habilitation',dateValidite:item.dateValidite||'',personnelId,organisme:item.organisme||'',notes:item.notes||''};
+
+    // Doublon : même qualification pour la même personne → mise à jour + remplacement du document
+    const existQualifId = item.matchQualifId || qualifId || null;
+    if (existQualifId) {
+      const idx = DB.qualifications.findIndex(x=>x.id===existQualifId);
+      if (idx>=0) {
+        const oldDocId = DB.qualifications[idx].docId;
+        DB.qualifications[idx] = {...DB.qualifications[idx],...data, docId:docId};
+        // Supprimer l'ancien document si différent
+        if (oldDocId && oldDocId !== docId) {
+          DB.documents = DB.documents.filter(x=>x.id!==oldDocId);
+          syncDelete('documents', oldDocId);
+        }
+        syncUpsert('qualifications', DB.qualifications[idx]);
+        updated++;
+        return;
+      }
+    }
+    // Chercher doublon par nom+type pour la même personne
+    const dupeIdx = DB.qualifications.findIndex(q=>q.personnelId===personnelId && q.nom.toLowerCase()===data.nom.toLowerCase() && q.type===data.type);
+    if (dupeIdx>=0) {
+      const oldDocId = DB.qualifications[dupeIdx].docId;
+      DB.qualifications[dupeIdx] = {...DB.qualifications[dupeIdx],...data, docId:docId};
+      if (oldDocId && oldDocId !== docId) { DB.documents=DB.documents.filter(x=>x.id!==oldDocId); syncDelete('documents',oldDocId); }
+      syncUpsert('qualifications', DB.qualifications[dupeIdx]);
+      updated++;
+    } else {
+      const newQ = {id:uid(),...data, docId:docId};
+      DB.qualifications.push(newQ);
+      syncUpsert('qualifications', newQ);
+      created++;
+    }
+  });
+
+  // Mettre à jour le document avec le bon refId/refNom
+  if (doc) { save('documents'); syncUpsert('documents', doc); }
+  save('materiel'); save('qualifications');
+
+  closeModal('modal-main');
+  const msgs = ['✅ Import terminé :'];
+  if (created) msgs.push(`${created} créé(s)`);
+  if (updated) msgs.push(`${updated} mis à jour`);
+  if (skipped) msgs.push(`${skipped} ignoré(s) (agent non trouvé)`);
+  alert(msgs.join('\n'));
+
+  // Retourner à la bonne fiche
+  if (entityType==='personnel' && entityId) openDetailPersonnel(entityId);
+  else if (entityType==='materiel' && entityId) openDetailMateriel(entityId);
+  else showPage('documents');
 }
 
 // ============================================================
