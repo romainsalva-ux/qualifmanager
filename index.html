@@ -567,10 +567,10 @@ const TABLE_MAP = { materiel: 'materiel', certifications: 'certifications', pers
 
 // Les 4 rubriques de matériel
 const RUBRIQUES = {
-  plongee:  { label: 'Matériel de plongée', singulier: 'équipement de plongée', icon: '🤿' },
-  navire:   { label: 'Navires',             singulier: 'navire',                icon: '⛵' },
-  vehicule: { label: 'Véhicules',           singulier: 'véhicule',              icon: '🚛' },
-  grue:     { label: 'Grues',               singulier: 'grue',                  icon: '🏗️' },
+  plongee:  { label: 'Matériel de plongée', singulier: 'équipement de plongée', pluriel: 'équipements de plongée', icon: '🤿' },
+  navire:   { label: 'Navires',             singulier: 'navire',                pluriel: 'navires',               icon: '⛵' },
+  vehicule: { label: 'Véhicules',           singulier: 'véhicule',              pluriel: 'véhicules',             icon: '🚛' },
+  grue:     { label: 'Grues',               singulier: 'grue',                  pluriel: 'grues',                 icon: '🏗️' },
 };
 
 // Pull toutes les données depuis Supabase au démarrage / login
@@ -1119,7 +1119,7 @@ function renderMaterielPage(rubrique) {
   <div class="page-header">
     <div>
       <div class="page-title">${R.icon} ${R.label}</div>
-      <div class="page-sub">${items.length} ${R.singulier}${items.length>1?'s':''}${expired?` · ${expired} en alerte`:''}</div>
+      <div class="page-sub">${items.length} ${items.length>1?R.pluriel:R.singulier}${expired?` · ${expired} en alerte`:''}</div>
     </div>
     <div class="header-actions">
       <button class="btn btn-ghost" onclick="exportExcel('materiel')">⬇️ Export Excel</button>
