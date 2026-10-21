@@ -1109,19 +1109,63 @@ function renderMaterielPage(rubrique) {
   const soon    = items.filter(m => materielStatus(m.id).status === 'soon').length;
   const sansCertif = items.filter(m => materielStatus(m.id).status === 'none').length;
 
-  // Regroupement par sous-type : chaque désignation forme une sous-rubrique repliable
+  // Les navires se classent par nom (un bateau = une sous-rubrique qui déplie ses
+  // certifications). Les autres rubriques se regroupent par sous-type.
+  const parNom = rubrique === 'navire';
+
   const groupes = new Map();
   items.forEach(m => {
-    const cle = (m.souscat||'').trim() || 'Sans sous-type';
+    const cle = parNom
+      ? ((m.nom||'').trim() || 'Sans nom')
+      : ((m.souscat||'').trim() || 'Sans sous-type');
     if (!groupes.has(cle)) groupes.set(cle, []);
     groupes.get(cle).push(m);
   });
-  // Les sous-rubriques les plus fournies d'abord, "Sans sous-type" toujours en dernier
+  // Par nom : ordre alphabétique. Par sous-type : les plus fournis d'abord.
   const groupesTries = [...groupes.entries()].sort((a,b) => {
-    if (a[0]==='Sans sous-type') return 1;
-    if (b[0]==='Sans sous-type') return -1;
+    if (a[0]==='Sans sous-type' || a[0]==='Sans nom') return 1;
+    if (b[0]==='Sans sous-type' || b[0]==='Sans nom') return -1;
+    if (parNom) return a[0].localeCompare(b[0],'fr');
     return b[1].length - a[1].length || a[0].localeCompare(b[0],'fr');
   });
+
+  // Contenu déplié d'un navire : directement ses certifications
+  const tableauCertifs = (liste) => {
+    const rows = liste.flatMap(m => {
+      const cs = certifsOf(m.id);
+      if (!cs.length) return [`<tr><td colspan="6" style="color:var(--text3);font-size:12.5px">Aucune certification —
+        <span style="color:var(--blue2);cursor:pointer" onclick="openAddCertif('${m.id}')">en ajouter une</span></td></tr>`];
+      return cs.map(c => {
+        const linkedDoc = c.docId ? DB.documents.find(d=>d.id===c.docId) : null;
+        const docBtn = linkedDoc
+          ? `<button class="btn btn-ghost btn-sm" title="Document attaché — cliquer pour remplacer" onclick="event.stopPropagation();openDocMenuCertif('${c.id}','${m.id}')" style="color:var(--blue2)">🔗</button>`
+          : `<button class="btn btn-ghost btn-sm" title="Ajouter un document" onclick="event.stopPropagation();openDocMenuCertif('${c.id}','${m.id}')">📎</button>`;
+        return `<tr>
+          <td><div class="td-name">${c.nom}</div></td>
+          <td><span class="cat-chip">${c.type||'Certification'}</span></td>
+          <td>${fmtDate(c.dateValidite)}</td>
+          <td>${badgeFor(c.dateValidite)}</td>
+          <td>${c.organisme||'—'}</td>
+          <td style="white-space:nowrap">
+            ${docBtn}
+            <button class="btn btn-ghost btn-sm" title="Modifier" onclick="openAddCertif('${m.id}','${c.id}')">✏️</button>
+            <button class="btn btn-danger btn-sm" title="Supprimer" onclick="deleteCertif('${c.id}','${m.id}')">🗑</button>
+          </td>
+        </tr>`;
+      });
+    }).join('');
+    const m0 = liste[0];
+    return `<div class="table-wrap" style="border-top:1px solid var(--border)"><table>
+      <thead><tr><th>Certification</th><th>Type</th><th>Validité</th><th>Statut</th><th>Organisme</th><th>Actions</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>
+    <div style="display:flex;gap:8px;padding:10px 16px;border-top:1px solid var(--border);flex-wrap:wrap">
+      <button class="btn btn-ghost btn-sm" onclick="openAddCertif('${m0.id}')">➕ Ajouter une certification</button>
+      <button class="btn btn-ghost btn-sm" onclick="openDetailMateriel('${m0.id}')">👁 Ouvrir la fiche</button>
+      <button class="btn btn-ghost btn-sm" onclick="openEditMateriel('${m0.id}')">✏️ Modifier</button>
+      <button class="btn btn-danger btn-sm" style="margin-left:auto" onclick="deleteMateriel('${m0.id}')">🗑 Supprimer</button>
+    </div>`;
+  };
 
   const ligne = m => {
     const st = materielStatus(m.id);
@@ -1146,32 +1190,37 @@ function renderMaterielPage(rubrique) {
   const blocs = groupesTries.map(([nom, liste]) => {
     const cle = rubrique + '|' + nom;
     const ouvert = !!groupesOuverts[cle];
-    const exp = liste.filter(m=>materielStatus(m.id).status==='expired').length;
-    const sn  = liste.filter(m=>materielStatus(m.id).status==='soon').length;
-    const sans= liste.filter(m=>materielStatus(m.id).status==='none').length;
-    const aJour = liste.length - exp - sn - sans;
+    // Par nom : on compte les certifications du navire. Par sous-type : les équipements.
+    const base = parNom ? liste.flatMap(m=>certifsOf(m.id)) : liste;
+    const st = x => parNom ? getStatus(x.dateValidite).status : materielStatus(x.id).status;
+    const exp = base.filter(x=>st(x)==='expired').length;
+    const sn  = base.filter(x=>st(x)==='soon').length;
+    const sans= parNom ? (base.length ? 0 : 1) : base.filter(x=>st(x)==='none').length;
+    const aJour = Math.max(0, base.length - exp - sn - (parNom?0:sans));
     return `
     <div class="card" style="padding:0;overflow:hidden;margin-bottom:10px">
       <div onclick="toggleSousRubrique('${cle.replace(/'/g,"\\'")}')"
         style="display:flex;align-items:center;gap:12px;padding:13px 16px;cursor:pointer;user-select:none"
         onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background=''">
         <span style="font-size:11px;color:var(--text3);width:10px;transition:transform .15s;display:inline-block;transform:rotate(${ouvert?90:0}deg)">▶</span>
-        <span style="font-size:20px">${catIcon(null, nom)}</span>
+        <span style="font-size:20px">${parNom ? R.icon : catIcon(null, nom)}</span>
         <div style="flex:1;min-width:0">
           <div style="font-size:14px;font-weight:600">${nom}</div>
-          <div style="font-size:11.5px;color:var(--text3)">${liste.length} équipement${liste.length>1?'s':''}</div>
+          <div style="font-size:11.5px;color:var(--text3)">${parNom
+            ? [liste[0].ref, liste[0].souscat].filter(Boolean).join(' · ') || 'Navire'
+            : `${liste.length} équipement${liste.length>1?'s':''}`}</div>
         </div>
         <div style="display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end">
           ${exp?`<span class="badge badge-red">${exp} expiré${exp>1?'s':''}</span>`:''}
           ${sn?`<span class="badge badge-amber">${sn} bientôt</span>`:''}
           ${aJour?`<span class="badge badge-green">${aJour} à jour</span>`:''}
-          ${sans?`<span class="badge badge-gray">${sans} sans certif.</span>`:''}
+          ${sans?`<span class="badge badge-gray">${parNom?'Aucune certification':sans+' sans certif.'}</span>`:''}
         </div>
       </div>
-      ${ouvert ? `<div class="table-wrap" style="border-top:1px solid var(--border)"><table>
+      ${ouvert ? (parNom ? tableauCertifs(liste) : `<div class="table-wrap" style="border-top:1px solid var(--border)"><table>
         <thead><tr><th>Désignation / Référence</th><th>Certifications</th><th>Prochaine échéance</th><th>Statut</th><th>Actions</th></tr></thead>
         <tbody>${liste.map(ligne).join('')}</tbody>
-      </table></div>` : ''}
+      </table></div>`) : ''}
     </div>`;
   }).join('');
 
@@ -1194,7 +1243,7 @@ function renderMaterielPage(rubrique) {
     <div class="stat-card blue"><span class="stat-icon">📋</span><div class="stat-num blue">${sansCertif}</div><div class="stat-label">Sans certification</div></div>
   </div>
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
-    <div class="section-title" style="margin-bottom:0">Sous-rubriques (${groupesTries.length})</div>
+    <div class="section-title" style="margin-bottom:0">${parNom?'Navires':'Sous-rubriques'} (${groupesTries.length})</div>
     <button class="btn btn-ghost btn-sm" onclick="toggleToutesSousRubriques('${rubrique}')">${groupesTries.every(([n])=>groupesOuverts[rubrique+'|'+n]) ? '▲ Tout replier' : '▼ Tout déplier'}</button>
   </div>
   ${blocs}` : `<div class="empty"><div class="empty-icon">${R.icon}</div><div class="empty-text">Aucun ${R.singulier} enregistré</div><div class="empty-sub">Cliquez sur "Ajouter" pour commencer</div></div>`}`;
@@ -1209,7 +1258,9 @@ function toggleSousRubrique(cle) {
 }
 
 function toggleToutesSousRubriques(rubrique) {
-  const sous = [...new Set(DB.materiel.filter(m=>rubriqueOf(m)===rubrique).map(m=>(m.souscat||'').trim()||'Sans sous-type'))];
+  const parNom = rubrique === 'navire';
+  const sous = [...new Set(DB.materiel.filter(m=>rubriqueOf(m)===rubrique)
+    .map(m => parNom ? ((m.nom||'').trim()||'Sans nom') : ((m.souscat||'').trim()||'Sans sous-type')))];
   const toutOuvert = sous.every(n => groupesOuverts[rubrique+'|'+n]);
   sous.forEach(n => { groupesOuverts[rubrique+'|'+n] = !toutOuvert; });
   showPage(currentPage);
