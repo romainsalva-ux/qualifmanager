@@ -852,11 +852,26 @@ function rubriqueOf(m) {
 function catIcon(cat, souscat) {
   if (souscat) {
     const s = souscat.toLowerCase();
+    // Plongée
+    if (s.includes('détend') || s.includes('detend') || s.includes('déten') || s.includes('deten')) return '🫁';
+    if (s.includes('casque')) return '🪖';
+    if (s.includes('narguil')) return '🧵';
+    if (s.includes('compresseur')) return '⚙️';
+    if (s.includes('tableau')) return '🎛️';
+    if (s.includes('stab') || s.includes('gilet')) return '🦺';
+    if (s.includes('radio') || s.includes('comm')) return '📻';
+    if (s.includes('oxygén') || s.includes('oxygen')) return '🏥';
+    if (s.includes('analyseur')) return '🧪';
+    if (s.includes('bouteille') || s.includes('bloc')) return '🫧';
+    if (s.includes('combinaison')) return '🤿';
+    if (s.includes('ombilic')) return '🧶';
+    // Navires / véhicules / engins
     if (s.includes('bateau') || s.includes('navire') || s.includes('voile') || s.includes('vedette') || s.includes('zodiac') || s.includes('annexe')) return '⛵';
     if (s.includes('moto')) return '🏍️';
     if (s.includes('voiture') || s.includes('berline') || s.includes('break')) return '🚗';
     if (s.includes('remorque')) return '🚚';
     if (s.includes('grue')) return '🏗️';
+    if (s.includes('sans sous-type')) return '📦';
   }
   const icons = {Bouteille:'🫧',Plongée:'🤿',Véhicule:'🚛',Engin:'🏗️',EPI:'🦺',Bateau:'⛵',Autre:'📦','Aptitude médicale':'🏥',Diplôme:'🎓','Permis / Habilitation':'📋',Formation:'📚'};
   return icons[cat] || '📦';
@@ -1094,7 +1109,21 @@ function renderMaterielPage(rubrique) {
   const soon    = items.filter(m => materielStatus(m.id).status === 'soon').length;
   const sansCertif = items.filter(m => materielStatus(m.id).status === 'none').length;
 
-  const rows = items.map(m => {
+  // Regroupement par sous-type : chaque désignation forme une sous-rubrique repliable
+  const groupes = new Map();
+  items.forEach(m => {
+    const cle = (m.souscat||'').trim() || 'Sans sous-type';
+    if (!groupes.has(cle)) groupes.set(cle, []);
+    groupes.get(cle).push(m);
+  });
+  // Les sous-rubriques les plus fournies d'abord, "Sans sous-type" toujours en dernier
+  const groupesTries = [...groupes.entries()].sort((a,b) => {
+    if (a[0]==='Sans sous-type') return 1;
+    if (b[0]==='Sans sous-type') return -1;
+    return b[1].length - a[1].length || a[0].localeCompare(b[0],'fr');
+  });
+
+  const ligne = m => {
     const st = materielStatus(m.id);
     const certLabel = st.count === 0
       ? '<span style="color:var(--text3);font-size:12px">—</span>'
@@ -1103,7 +1132,6 @@ function renderMaterielPage(rubrique) {
     return `
     <tr onclick="openDetailMateriel('${m.id}')" style="cursor:pointer">
       <td><div class="td-name">${m.nom||'—'}</div><div class="td-sub">${m.ref||''}</div></td>
-      <td>${m.souscat||'—'}</td>
       <td>${certLabel}</td>
       <td>${prochaine}</td>
       <td>${materielBadge(m.id)}</td>
@@ -1113,6 +1141,38 @@ function renderMaterielPage(rubrique) {
         <button class="btn btn-danger btn-sm" title="Supprimer" onclick="deleteMateriel('${m.id}')">🗑</button>
       </td>
     </tr>`;
+  };
+
+  const blocs = groupesTries.map(([nom, liste]) => {
+    const cle = rubrique + '|' + nom;
+    const ouvert = !!groupesOuverts[cle];
+    const exp = liste.filter(m=>materielStatus(m.id).status==='expired').length;
+    const sn  = liste.filter(m=>materielStatus(m.id).status==='soon').length;
+    const sans= liste.filter(m=>materielStatus(m.id).status==='none').length;
+    const aJour = liste.length - exp - sn - sans;
+    return `
+    <div class="card" style="padding:0;overflow:hidden;margin-bottom:10px">
+      <div onclick="toggleSousRubrique('${cle.replace(/'/g,"\\'")}')"
+        style="display:flex;align-items:center;gap:12px;padding:13px 16px;cursor:pointer;user-select:none"
+        onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background=''">
+        <span style="font-size:11px;color:var(--text3);width:10px;transition:transform .15s;display:inline-block;transform:rotate(${ouvert?90:0}deg)">▶</span>
+        <span style="font-size:20px">${catIcon(null, nom)}</span>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:14px;font-weight:600">${nom}</div>
+          <div style="font-size:11.5px;color:var(--text3)">${liste.length} équipement${liste.length>1?'s':''}</div>
+        </div>
+        <div style="display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end">
+          ${exp?`<span class="badge badge-red">${exp} expiré${exp>1?'s':''}</span>`:''}
+          ${sn?`<span class="badge badge-amber">${sn} bientôt</span>`:''}
+          ${aJour?`<span class="badge badge-green">${aJour} à jour</span>`:''}
+          ${sans?`<span class="badge badge-gray">${sans} sans certif.</span>`:''}
+        </div>
+      </div>
+      ${ouvert ? `<div class="table-wrap" style="border-top:1px solid var(--border)"><table>
+        <thead><tr><th>Désignation / Référence</th><th>Certifications</th><th>Prochaine échéance</th><th>Statut</th><th>Actions</th></tr></thead>
+        <tbody>${liste.map(ligne).join('')}</tbody>
+      </table></div>` : ''}
+    </div>`;
   }).join('');
 
   return `
@@ -1133,10 +1193,26 @@ function renderMaterielPage(rubrique) {
     <div class="stat-card green"><span class="stat-icon">✅</span><div class="stat-num green">${items.length-expired-soon-sansCertif}</div><div class="stat-label">À jour</div></div>
     <div class="stat-card blue"><span class="stat-icon">📋</span><div class="stat-num blue">${sansCertif}</div><div class="stat-label">Sans certification</div></div>
   </div>
-  <div class="table-wrap"><table>
-    <thead><tr><th>Désignation / Référence</th><th>Type</th><th>Certifications</th><th>Prochaine échéance</th><th>Statut</th><th>Actions</th></tr></thead>
-    <tbody>${rows}</tbody>
-  </table></div>` : `<div class="empty"><div class="empty-icon">${R.icon}</div><div class="empty-text">Aucun ${R.singulier} enregistré</div><div class="empty-sub">Cliquez sur "Ajouter" pour commencer</div></div>`}`;
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+    <div class="section-title" style="margin-bottom:0">Sous-rubriques (${groupesTries.length})</div>
+    <button class="btn btn-ghost btn-sm" onclick="toggleToutesSousRubriques('${rubrique}')">${groupesTries.every(([n])=>groupesOuverts[rubrique+'|'+n]) ? '▲ Tout replier' : '▼ Tout déplier'}</button>
+  </div>
+  ${blocs}` : `<div class="empty"><div class="empty-icon">${R.icon}</div><div class="empty-text">Aucun ${R.singulier} enregistré</div><div class="empty-sub">Cliquez sur "Ajouter" pour commencer</div></div>`}`;
+}
+
+// État replié/déplié des sous-rubriques, conservé entre deux rendus
+const groupesOuverts = {};
+
+function toggleSousRubrique(cle) {
+  groupesOuverts[cle] = !groupesOuverts[cle];
+  showPage(currentPage);
+}
+
+function toggleToutesSousRubriques(rubrique) {
+  const sous = [...new Set(DB.materiel.filter(m=>rubriqueOf(m)===rubrique).map(m=>(m.souscat||'').trim()||'Sans sous-type'))];
+  const toutOuvert = sous.every(n => groupesOuverts[rubrique+'|'+n]);
+  sous.forEach(n => { groupesOuverts[rubrique+'|'+n] = !toutOuvert; });
+  showPage(currentPage);
 }
 
 function openAddMateriel(rubrique, id) {
