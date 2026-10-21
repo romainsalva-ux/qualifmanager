@@ -1169,6 +1169,7 @@ function openDetailMateriel(id) {
       <span class="doc-name">${d.nom}</span>
       <span class="doc-size">${d.date||''}</span>
       ${fileUrl ? `<span style="color:var(--blue2);font-size:11px">👁 Ouvrir</span>` : ''}
+      <button class="btn btn-danger btn-sm" style="margin-left:auto;padding:2px 8px;font-size:11px" onclick="event.stopPropagation();deleteDoc('${d.id}',{type:'materiel',entityId:'${id}'})">🗑</button>
     </div>`;
   }).join('') : '<div style="color:var(--text3);font-size:13px">Aucun document lié</div>'}
   <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
@@ -1344,6 +1345,7 @@ function openDetailPersonnel(id) {
         <span class="doc-name">${d.nom}</span>
         <span class="doc-size">${d.date||''}</span>
         ${fileUrl?`<span style="color:var(--blue2);font-size:11px">👁 Ouvrir</span>`:'<span style="color:var(--text3);font-size:11px">⏳</span>'}
+        <button class="btn btn-danger btn-sm" style="margin-left:auto;padding:2px 8px;font-size:11px" onclick="event.stopPropagation();deleteDoc('${d.id}',{type:'personnel',entityId:'${id}'})">🗑</button>
       </div>`;
     }).join('');
     return `<div class="section-title" style="margin-top:18px">📁 Documents liés (${docsLies.length})</div><div>${docItems}</div>`;
@@ -2045,12 +2047,28 @@ function applyExcelImport(items, docId) {
   showPage('materiel');
 }
 
-function deleteDoc(id) {
+function deleteDoc(id, context) {
   if (!confirm('Supprimer ce document ?')) return;
+  // Nettoyer le lien docId dans les qualifications qui référencent ce document
+  DB.qualifications.forEach(q => {
+    const data = typeof q.data === 'string' ? JSON.parse(q.data) : (q.data || {});
+    if (data.docId === id) {
+      data.docId = null;
+      q.data = data;
+    }
+  });
+  save('qualifications');
   DB.documents = DB.documents.filter(x=>x.id!==id);
   save('documents');
   syncDelete('documents', id);
-  showPage('documents');
+  // Retourner sur la bonne vue selon le contexte
+  if (context && context.type === 'personnel') {
+    openDetailPersonnel(context.entityId);
+  } else if (context && context.type === 'materiel') {
+    openDetailMateriel(context.entityId);
+  } else {
+    showPage('documents');
+  }
 }
 
 function previewDoc(id) {
