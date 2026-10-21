@@ -1140,11 +1140,13 @@ function saveMateriel(id) {
 }
 
 function deleteMateriel(id) {
-  if (!confirm('Supprimer cet équipement ?')) return;
-  DB.materiel = DB.materiel.filter(x=>x.id!==id);
-  save('materiel');
-  syncDelete('materiel', id);
-  showPage(currentPage);
+  const m = DB.materiel.find(x=>x.id===id);
+  confirmDelete(m ? `"${m.nom||m.ref||'cet équipement'}"` : 'cet équipement', () => {
+    DB.materiel = DB.materiel.filter(x=>x.id!==id);
+    save('materiel');
+    syncDelete('materiel', id);
+    showPage(currentPage);
+  });
 }
 
 function openDetailMateriel(id) {
@@ -1358,14 +1360,16 @@ function openDetailPersonnel(id) {
 }
 
 function deletePersonnel(id) {
-  if (!confirm('Supprimer cet agent et toutes ses qualifications ?')) return;
-  const qualifsToDelete = DB.qualifications.filter(x=>x.personnelId===id).map(x=>x.id);
-  DB.personnel = DB.personnel.filter(x=>x.id!==id);
-  DB.qualifications = DB.qualifications.filter(x=>x.personnelId!==id);
-  save('personnel'); save('qualifications');
-  syncDelete('personnel', id);
-  qualifsToDelete.forEach(qid => syncDelete('qualifications', qid));
-  closeModal('modal-detail'); showPage('personnel');
+  const p = DB.personnel.find(x=>x.id===id);
+  confirmDelete(p ? `"${p.nom}" et toutes ses qualifications` : 'cet agent et toutes ses qualifications', () => {
+    const qualifsToDelete = DB.qualifications.filter(x=>x.personnelId===id).map(x=>x.id);
+    DB.personnel = DB.personnel.filter(x=>x.id!==id);
+    DB.qualifications = DB.qualifications.filter(x=>x.personnelId!==id);
+    save('personnel'); save('qualifications');
+    syncDelete('personnel', id);
+    qualifsToDelete.forEach(qid => syncDelete('qualifications', qid));
+    closeModal('modal-detail'); showPage('personnel');
+  });
 }
 
 // ============================================================
@@ -1465,13 +1469,15 @@ function saveQualif(id) {
 }
 
 function deleteQualif(id, personnelId) {
-  if (!confirm('Supprimer cette qualification ?')) return;
-  DB.qualifications = DB.qualifications.filter(x=>x.id!==id);
-  save('qualifications');
-  syncDelete('qualifications', id);
-  closeModal('modal-detail');
-  if (personnelId) openDetailPersonnel(personnelId);
-  else showPage('diplomes');
+  const q = DB.qualifications.find(x=>x.id===id);
+  confirmDelete(q ? `"${q.nom||'cette qualification'}"` : 'cette qualification', () => {
+    DB.qualifications = DB.qualifications.filter(x=>x.id!==id);
+    save('qualifications');
+    syncDelete('qualifications', id);
+    closeModal('modal-detail');
+    if (personnelId) openDetailPersonnel(personnelId);
+    else showPage('diplomes');
+  });
 }
 
 // ============================================================
@@ -2048,27 +2054,29 @@ function applyExcelImport(items, docId) {
 }
 
 function deleteDoc(id, context) {
-  if (!confirm('Supprimer ce document ?')) return;
-  // Nettoyer le lien docId dans les qualifications qui référencent ce document
-  DB.qualifications.forEach(q => {
-    const data = typeof q.data === 'string' ? JSON.parse(q.data) : (q.data || {});
-    if (data.docId === id) {
-      data.docId = null;
-      q.data = data;
+  const d = DB.documents.find(x=>x.id===id);
+  confirmDelete(d ? `"${d.nom||'ce document'}"` : 'ce document', () => {
+    // Nettoyer le lien docId dans les qualifications qui référencent ce document
+    DB.qualifications.forEach(q => {
+      const data = typeof q.data === 'string' ? JSON.parse(q.data) : (q.data || {});
+      if (data.docId === id) {
+        data.docId = null;
+        q.data = data;
+      }
+    });
+    save('qualifications');
+    DB.documents = DB.documents.filter(x=>x.id!==id);
+    save('documents');
+    syncDelete('documents', id);
+    // Retourner sur la bonne vue selon le contexte
+    if (context && context.type === 'personnel') {
+      openDetailPersonnel(context.entityId);
+    } else if (context && context.type === 'materiel') {
+      openDetailMateriel(context.entityId);
+    } else {
+      showPage('documents');
     }
   });
-  save('qualifications');
-  DB.documents = DB.documents.filter(x=>x.id!==id);
-  save('documents');
-  syncDelete('documents', id);
-  // Retourner sur la bonne vue selon le contexte
-  if (context && context.type === 'personnel') {
-    openDetailPersonnel(context.entityId);
-  } else if (context && context.type === 'materiel') {
-    openDetailMateriel(context.entityId);
-  } else {
-    showPage('documents');
-  }
 }
 
 function previewDoc(id) {
@@ -2422,6 +2430,28 @@ function applyScanEntityImport(parsed, docId, entityType, entityId, qualifId) {
   if (entityType==='personnel' && entityId) openDetailPersonnel(entityId);
   else if (entityType==='materiel' && entityId) openDetailMateriel(entityId);
   else showPage('documents');
+}
+
+// Confirmation non-bloquante (remplace confirm() qui plante dans les modals sur mobile)
+function confirmDelete(msg, onConfirm) {
+  let overlay = document.getElementById('qm-confirm-overlay');
+  if (overlay) overlay.remove();
+  overlay = document.createElement('div');
+  overlay.id = 'qm-confirm-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.5)';
+  overlay.innerHTML = `
+    <div style="background:var(--bg1,#1e293b);border:1px solid var(--border,#334155);border-radius:16px;padding:24px;max-width:320px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,.5);text-align:center">
+      <div style="font-size:28px;margin-bottom:12px">🗑️</div>
+      <div style="font-size:15px;font-weight:600;color:var(--text1,#f1f5f9);margin-bottom:8px">Supprimer ?</div>
+      <div style="font-size:13px;color:var(--text3,#94a3b8);margin-bottom:20px">${msg}</div>
+      <div style="display:flex;gap:10px;justify-content:center">
+        <button onclick="document.getElementById('qm-confirm-overlay').remove()" style="flex:1;padding:10px;border-radius:10px;border:1px solid var(--border,#334155);background:transparent;color:var(--text2,#cbd5e1);font-size:14px;cursor:pointer">Annuler</button>
+        <button id="qm-confirm-btn" style="flex:1;padding:10px;border-radius:10px;border:none;background:#dc2626;color:#fff;font-size:14px;font-weight:600;cursor:pointer">Supprimer</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  document.getElementById('qm-confirm-btn').onclick = () => { overlay.remove(); onConfirm(); };
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
 }
 
 // Notification toast légère (non-bloquante)
