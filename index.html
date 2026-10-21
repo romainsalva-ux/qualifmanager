@@ -1317,7 +1317,10 @@ function openDetailPersonnel(id) {
     const docUrl = linkedDoc?.url || linkedDoc?.dataUrl || null;
     const typeCell = docUrl
       ? `<span class="cat-chip" onclick="event.stopPropagation();openDocFromQualif('${linkedDoc.id}')" style="cursor:pointer;border:1px solid var(--blue2)" title="Cliquer pour ouvrir le document">${catIcon(q.type)} ${q.type} 📎</span>`
-      : `<span class="cat-chip" onclick="event.stopPropagation();attachDocToQualif('${q.id}','${id}')" style="cursor:pointer;opacity:0.7;border:1px dashed var(--border2)" title="Cliquer pour attacher un document">${catIcon(q.type)} ${q.type} ＋</span>`;
+      : `<span class="cat-chip" onclick="event.stopPropagation();openDocMenu('${q.id}','${id}')" style="cursor:pointer;opacity:0.7;border:1px dashed var(--border2)" title="Ajouter un document">${catIcon(q.type)} ${q.type} ＋</span>`;
+    const docBtn = linkedDoc
+      ? `<button class="btn btn-ghost btn-sm" title="Document attaché — cliquer pour remplacer" onclick="event.stopPropagation();openDocMenu('${q.id}','${id}')" style="color:var(--blue2)">🔗</button>`
+      : `<button class="btn btn-ghost btn-sm" title="Ajouter un document" onclick="event.stopPropagation();openDocMenu('${q.id}','${id}')">📎</button>`;
     return `
     <tr>
       <td><div class="td-name">${q.nom}</div></td>
@@ -1326,7 +1329,7 @@ function openDetailPersonnel(id) {
       <td>${badgeFor(q.dateValidite)}</td>
       <td>${q.organisme||'—'}</td>
       <td onclick="event.stopPropagation()" style="white-space:nowrap">
-        <button class="btn btn-ghost btn-sm" title="Renouveler le document via IA" onclick="openScanDocForEntity('qualif','${id}','${q.id}')">📷</button>
+        ${docBtn}
         <button class="btn btn-ghost btn-sm" onclick="openAddQualif('${id}','${q.id}')">✏️</button>
         <button class="btn btn-danger btn-sm" onclick="deleteQualif('${q.id}','${id}')">🗑</button>
       </td>
@@ -1342,7 +1345,6 @@ function openDetailPersonnel(id) {
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
     <div class="section-title" style="margin-bottom:0">Qualifications & Diplômes (${qualifs.length})</div>
     <div style="display:flex;gap:8px">
-      <button class="btn btn-primary btn-sm" onclick="openScanDocForEntity('personnel','${id}')">📷 Scanner (IA)</button>
       <button class="btn btn-ghost btn-sm" onclick="closeModal('modal-detail');openAddQualif('${id}')">➕ Ajouter</button>
     </div>
   </div>
@@ -1350,21 +1352,6 @@ function openDetailPersonnel(id) {
     <thead><tr><th>Qualification / Diplôme</th><th>Type</th><th>Validité</th><th>Statut</th><th>Organisme</th><th>Actions</th></tr></thead>
     <tbody>${qRows}</tbody>
   </table></div>` : '<div style="color:var(--text3);font-size:13px;padding:16px 0">Aucune qualification enregistrée</div>'}
-  ${(()=>{
-    const docsLies = DB.documents.filter(d=>d.refId===id);
-    if (!docsLies.length) return '';
-    const docItems = docsLies.map(d=>{
-      const fileUrl = d.url||d.dataUrl||null;
-      return `<div class="doc-item" onclick="${fileUrl?`openDocFromQualif('${d.id}')`:'void(0)'}" style="cursor:${fileUrl?'pointer':'default'}">
-        <span class="doc-icon">${d.type==='pdf'?'📕':d.type==='image'?'🖼️':'📄'}</span>
-        <span class="doc-name">${d.nom}</span>
-        <span class="doc-size">${d.date||''}</span>
-        ${fileUrl?`<span style="color:var(--blue2);font-size:11px">👁 Ouvrir</span>`:'<span style="color:var(--text3);font-size:11px">⏳</span>'}
-        <button class="btn btn-danger btn-sm" style="margin-left:auto;padding:2px 8px;font-size:11px" onclick="event.stopPropagation();deleteDoc('${d.id}',{type:'personnel',entityId:'${id}'})">🗑</button>
-      </div>`;
-    }).join('');
-    return `<div class="section-title" style="margin-top:18px">📁 Documents liés (${docsLies.length})</div><div>${docItems}</div>`;
-  })()}`;
   document.getElementById('detail-footer').innerHTML = `
     <button class="btn btn-ghost" onclick="closeModal('modal-detail')">Fermer</button>
     <button class="btn btn-ghost" onclick="closeModal('modal-detail');openAddPersonnel('${id}')">✏️ Modifier</button>
@@ -1608,6 +1595,66 @@ function openUploadDoc(refId) {
     </select>
   </div>`;
   document.getElementById('modal-footer').innerHTML = `<button class="btn btn-ghost" onclick="closeModal('modal-main')">Annuler</button>`;
+  openModal('modal-main');
+}
+
+// Menu rapide d'ajout de document sur une qualification
+function openDocMenu(qualifId, personnelId) {
+  const q = DB.qualifications.find(x=>x.id===qualifId);
+  if (!q) return;
+  const linkedDoc = q.docId ? DB.documents.find(d=>d.id===q.docId) : null;
+  const hasDoc = !!linkedDoc;
+
+  const scanInputId = 'doc-menu-scan-' + Date.now();
+  const fileInputId = 'doc-menu-file-' + Date.now();
+
+  document.getElementById('modal-title').textContent = hasDoc ? '🔗 Remplacer le document' : '📎 Ajouter un document';
+  document.getElementById('modal-body').innerHTML = `
+    <div style="font-size:13px;color:var(--text3);margin-bottom:16px;text-align:center">${q.nom}</div>
+    ${hasDoc ? `
+    <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--surface2);border:1px solid var(--blue2);border-radius:10px;margin-bottom:16px">
+      <span style="font-size:20px">${linkedDoc.type==='pdf'?'📕':linkedDoc.type==='image'?'🖼️':'📄'}</span>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${linkedDoc.nom}</div>
+        <div style="font-size:11px;color:var(--text3)">${linkedDoc.date||''}</div>
+      </div>
+      <button class="btn btn-ghost btn-sm" onclick="openDocFromQualif('${linkedDoc.id}');closeModal('modal-main')" style="color:var(--blue2)">👁 Ouvrir</button>
+    </div>` : ''}
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <label for="${scanInputId}" style="display:flex;flex-direction:column;align-items:center;gap:10px;padding:20px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:12px;cursor:pointer;transition:border-color 0.2s"
+        onmouseover="this.style.borderColor='var(--blue2)'" onmouseout="this.style.borderColor='var(--border)'">
+        <span style="font-size:32px">📷</span>
+        <div style="text-align:center">
+          <div style="font-size:13px;font-weight:600">Photo / Scan</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:3px">Analyse IA automatique</div>
+        </div>
+        <span style="font-size:10px;background:rgba(139,92,246,0.15);color:#a78bfa;padding:2px 8px;border-radius:10px">✨ IA</span>
+      </label>
+      <label for="${fileInputId}" style="display:flex;flex-direction:column;align-items:center;gap:10px;padding:20px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:12px;cursor:pointer;transition:border-color 0.2s"
+        onmouseover="this.style.borderColor='var(--blue2)'" onmouseout="this.style.borderColor='var(--border)'">
+        <span style="font-size:32px">📁</span>
+        <div style="text-align:center">
+          <div style="font-size:13px;font-weight:600">Importer fichier</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:3px">PDF, Word, Excel</div>
+        </div>
+        <span style="font-size:10px;background:rgba(59,130,246,0.15);color:var(--blue2);padding:2px 8px;border-radius:10px">📄 Fichier</span>
+      </label>
+    </div>
+    <input type="file" id="${scanInputId}" accept="image/*,.pdf" capture="environment" style="display:none">
+    <input type="file" id="${fileInputId}" accept=".pdf,.doc,.docx,.xls,.xlsx,image/*" style="display:none">`;
+  document.getElementById('modal-footer').innerHTML = `<button class="btn btn-ghost" onclick="closeModal('modal-main')">Annuler</button>`;
+
+  // Wiring des inputs après insertion dans le DOM
+  setTimeout(()=>{
+    const scanInput = document.getElementById(scanInputId);
+    if (scanInput) scanInput.onchange = (e) => {
+      closeModal('modal-main');
+      handleScanForEntity(e, 'qualif', personnelId, qualifId);
+    };
+    const fileInput = document.getElementById(fileInputId);
+    if (fileInput) fileInput.onchange = (e) => handleAttachNewDoc(e, qualifId, personnelId||'');
+  }, 50);
+
   openModal('modal-main');
 }
 
