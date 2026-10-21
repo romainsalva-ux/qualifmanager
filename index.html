@@ -1351,7 +1351,7 @@ function openDetailPersonnel(id) {
   ${qualifs.length ? `<div class="table-wrap"><table>
     <thead><tr><th>Qualification / Diplôme</th><th>Type</th><th>Validité</th><th>Statut</th><th>Organisme</th><th>Actions</th></tr></thead>
     <tbody>${qRows}</tbody>
-  </table></div>` : '<div style="color:var(--text3);font-size:13px;padding:16px 0">Aucune qualification enregistrée</div>'}
+  </table></div>` : '<div style="color:var(--text3);font-size:13px;padding:16px 0">Aucune qualification enregistrée</div>'}`;
   document.getElementById('detail-footer').innerHTML = `
     <button class="btn btn-ghost" onclick="closeModal('modal-detail')">Fermer</button>
     <button class="btn btn-ghost" onclick="closeModal('modal-detail');openAddPersonnel('${id}')">✏️ Modifier</button>
