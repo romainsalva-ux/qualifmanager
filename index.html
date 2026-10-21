@@ -1477,8 +1477,11 @@ function deleteQualif(id, personnelId) {
   const qData = q ? (q.data && typeof q.data === 'object' ? q.data : q) : null;
   const nomLabel = qData ? `"${qData.nom||id}"` : `qualification`;
   confirmDelete(nomLabel, () => {
-    // Supprimer par les deux formes d'id possibles
+    console.log('[deleteQualif] id à supprimer:', id);
+    console.log('[deleteQualif] DB.qualifications ids:', DB.qualifications.map(x=>x.id));
+    const before = DB.qualifications.length;
     DB.qualifications = DB.qualifications.filter(x=>x.id!==id && !(x.data && x.data.id===id));
+    console.log('[deleteQualif] supprimé:', before - DB.qualifications.length, 'items');
     save('qualifications');
     syncDelete('qualifications', id);
     closeModal('modal-detail');
