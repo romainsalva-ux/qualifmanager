@@ -1490,11 +1490,7 @@ function deleteQualif(id, personnelId) {
   const qData = q ? (q.data && typeof q.data === 'object' ? q.data : q) : null;
   const nomLabel = qData ? `"${qData.nom||id}"` : `qualification`;
   confirmDelete(nomLabel, () => {
-    console.log('[deleteQualif] id à supprimer:', id);
-    console.log('[deleteQualif] DB.qualifications ids:', DB.qualifications.map(x=>x.id));
-    const before = DB.qualifications.length;
     DB.qualifications = DB.qualifications.filter(x=>x.id!==id && !(x.data && x.data.id===id));
-    console.log('[deleteQualif] supprimé:', before - DB.qualifications.length, 'items');
     save('qualifications');
     syncDelete('qualifications', id);
     closeModal('modal-detail');
@@ -2435,7 +2431,15 @@ function applyScanEntityImport(parsed, docId, entityType, entityId, qualifId) {
   });
 
   // Mettre à jour le document avec le bon refId/refNom et re-sauvegarder
-  if (doc) { save('documents'); syncUpsert('documents', doc); }
+  // Pour qualif/personnel : s'assurer que le doc est bien rattaché au personnel
+  if (doc) {
+    if ((entityType==='personnel'||entityType==='qualif') && entityId && !doc.refId) {
+      const pRef = DB.personnel.find(x=>x.id===entityId);
+      doc.refId = entityId;
+      doc.refNom = pRef?.nom || doc.refNom;
+    }
+    save('documents'); syncUpsert('documents', doc);
+  }
   save('materiel'); save('qualifications');
   generateNotifications();
   updateBadges();
@@ -2450,7 +2454,8 @@ function applyScanEntityImport(parsed, docId, entityType, entityId, qualifId) {
   showToast('✅ Import terminé' + (msgs.length ? ' : ' + msgs.join(', ') : ''), 'success');
 
   // Rafraîchir la fiche courante
-  if (entityType==='personnel' && entityId) openDetailPersonnel(entityId);
+  // Pour 'qualif', entityId est l'id du personnel → on revient sur la fiche personnel
+  if ((entityType==='personnel'||entityType==='qualif') && entityId) openDetailPersonnel(entityId);
   else if (entityType==='materiel' && entityId) openDetailMateriel(entityId);
   else showPage('documents');
 }
