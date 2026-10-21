@@ -313,22 +313,22 @@ tr:hover td{background:rgba(255,255,255,0.02)}
       </div>
 
       <div class="nav-section">Matériel</div>
-      <div class="nav-item" onclick="showPage('materiel')" id="nav-materiel">
-        <span class="nav-icon">🔧</span> Tout le matériel
-      </div>
       <div class="nav-item" onclick="showPage('plongee')" id="nav-plongee">
-        <span class="nav-icon">🤿</span> Plongée
+        <span class="nav-icon">🤿</span> Matériel de plongée
       </div>
-      <div class="nav-item" onclick="showPage('vehicules')" id="nav-vehicules">
-        <span class="nav-icon">🚛</span> Véhicules / Grues
+      <div class="nav-item" onclick="showPage('navire')" id="nav-navire">
+        <span class="nav-icon">⛵</span> Navires
+      </div>
+      <div class="nav-item" onclick="showPage('vehicule')" id="nav-vehicule">
+        <span class="nav-icon">🚛</span> Véhicules
+      </div>
+      <div class="nav-item" onclick="showPage('grue')" id="nav-grue">
+        <span class="nav-icon">🏗️</span> Grues
       </div>
 
       <div class="nav-section">Personnel</div>
       <div class="nav-item" onclick="showPage('personnel')" id="nav-personnel">
         <span class="nav-icon">👥</span> Équipe
-      </div>
-      <div class="nav-item" onclick="showPage('diplomes')" id="nav-diplomes">
-        <span class="nav-icon">🎓</span> Diplômes & Aptitudes
       </div>
 
       <div class="nav-section">Documents</div>
@@ -563,44 +563,49 @@ async function onAuthReady(user) {
 }
 
 // Table Supabase correspondant à chaque clé DB locale (schéma plat)
-const TABLE_MAP = { materiel: 'materiel', personnel: 'personnel', qualifications: 'qualifications', documents: 'documents' };
+const TABLE_MAP = { materiel: 'materiel', certifications: 'certifications', personnel: 'personnel', qualifications: 'qualifications', documents: 'documents' };
+
+// Les 4 rubriques de matériel
+const RUBRIQUES = {
+  plongee:  { label: 'Matériel de plongée', singulier: 'équipement de plongée', icon: '🤿' },
+  navire:   { label: 'Navires',             singulier: 'navire',                icon: '⛵' },
+  vehicule: { label: 'Véhicules',           singulier: 'véhicule',              icon: '🚛' },
+  grue:     { label: 'Grues',               singulier: 'grue',                  icon: '🏗️' },
+};
 
 // Pull toutes les données depuis Supabase au démarrage / login
 async function pullAllFromSupabase() {
   if (!sb || !currentUser) return;
   try {
-    const [matRes, persRes, qualRes, docRes] = await Promise.all([
+    const [matRes, certRes, persRes, qualRes, docRes] = await Promise.all([
       sb.from('materiel').select('*').eq('org_id','bonna-tp').order('created_at'),
+      sb.from('certifications').select('*').eq('org_id','bonna-tp').order('created_at'),
       sb.from('personnel').select('*').eq('org_id','bonna-tp').order('created_at'),
       sb.from('qualifications').select('*').eq('org_id','bonna-tp').order('created_at'),
       sb.from('documents').select('*').eq('org_id','bonna-tp').order('created_at'),
     ]);
     if (matRes.error) throw matRes.error;
+    if (certRes.error) throw certRes.error;
     if (persRes.error) throw persRes.error;
     if (qualRes.error) throw qualRes.error;
     if (docRes.error) throw docRes.error;
 
-    // materiel : colonnes plates
-    DB.materiel = matRes.data || [];
-    // personnel, qualifications, documents : données dans colonne jsonb "data"
+    // Toutes les tables stockent dans la colonne jsonb "data".
     // On s'assure que chaque item a bien un id (fallback sur l'id de la ligne Supabase)
-    DB.personnel = (persRes.data || []).map(r => {
-      const item = r.data && typeof r.data === 'object' ? r.data : r;
-      if (!item.id) item.id = r.id;
-      return item;
-    });
-    DB.qualifications = (qualRes.data || []).map(r => {
-      const item = r.data && typeof r.data === 'object' ? r.data : r;
-      if (!item.id) item.id = r.id;
-      return item;
-    });
-    DB.documents = (docRes.data || []).map(r => {
-      const item = r.data && typeof r.data === 'object' ? r.data : r;
+    const unwrap = rows => (rows || []).map(r => {
+      const item = r.data && typeof r.data === 'object' && Object.keys(r.data).length ? r.data : r;
       if (!item.id) item.id = r.id;
       return item;
     });
 
+    DB.materiel = unwrap(matRes.data);
+    DB.certifications = unwrap(certRes.data);
+    DB.personnel = unwrap(persRes.data);
+    DB.qualifications = unwrap(qualRes.data);
+    DB.documents = unwrap(docRes.data);
+
     localStorage.setItem('qm_materiel', JSON.stringify(DB.materiel));
+    localStorage.setItem('qm_certifications', JSON.stringify(DB.certifications));
     localStorage.setItem('qm_personnel', JSON.stringify(DB.personnel));
     localStorage.setItem('qm_qualifications', JSON.stringify(DB.qualifications));
     localStorage.setItem('qm_documents', JSON.stringify(DB.documents));
@@ -617,13 +622,8 @@ async function syncUpsert(key, item) {
   if (!table) return;
   setSyncStatus('syncing');
   try {
-    // materiel : colonnes plates. Les autres tables stockent dans colonne "data" jsonb.
-    let payload;
-    if (key === 'materiel') {
-      payload = { ...item, org_id: 'bonna-tp' };
-    } else {
-      payload = { id: item.id, data: item, org_id: 'bonna-tp' };
-    }
+    // Toutes les tables stockent dans la colonne "data" jsonb.
+    const payload = { id: item.id, data: item, org_id: 'bonna-tp' };
     const { error } = await sb.from(table).upsert(payload, { onConflict: 'id' });
     if (error) throw error;
     setSyncStatus('online');
@@ -673,9 +673,9 @@ function applyRealtimeChange(key, payload) {
     const idx = arr.findIndex(x => x.id === payload.old.id);
     if (idx !== -1) arr.splice(idx, 1);
   } else {
-    // materiel : colonnes plates. Les autres : données dans colonne "data" jsonb.
+    // Toutes les tables stockent dans la colonne "data" jsonb.
     const raw = payload.new;
-    const item = (key !== 'materiel' && raw.data && typeof raw.data === 'object') ? raw.data : raw;
+    const item = (raw.data && typeof raw.data === 'object' && Object.keys(raw.data).length) ? raw.data : raw;
     const idx = arr.findIndex(x => x.id === item.id);
     if (idx !== -1) arr[idx] = item; else arr.push(item);
   }
@@ -693,6 +693,7 @@ function applyRealtimeChange(key, payload) {
 // ============================================================
 const DB = {
   materiel: JSON.parse(localStorage.getItem('qm_materiel') || '[]'),
+  certifications: JSON.parse(localStorage.getItem('qm_certifications') || '[]'),
   personnel: JSON.parse(localStorage.getItem('qm_personnel') || '[]'),
   qualifications: JSON.parse(localStorage.getItem('qm_qualifications') || '[]'),
   documents: JSON.parse(localStorage.getItem('qm_documents') || '[]'),
@@ -720,14 +721,23 @@ function initDemoData() {
   ];
 
   DB.materiel = [
-    {id:uid(),nom:'Bloc 12L — B047',ref:'UW-2019-047',categorie:'Bouteille',souscat:'Bouteille plongée',dateValidite:addDays(today,-10),organisme:'Bureau Veritas',notes:''},
-    {id:uid(),nom:'Bloc 15L — B062',ref:'UW-2021-062',categorie:'Bouteille',souscat:'Bouteille plongée',dateValidite:addDays(today,18),organisme:'Apave',notes:''},
-    {id:uid(),nom:'Détendeur Mk25 — D012',ref:'SP-MK25-0012',categorie:'Plongée',souscat:'Détendeur',dateValidite:addDays(today,22),organisme:'ScubaPro SAV',notes:''},
-    {id:uid(),nom:'Camion Iveco — AA-123-BB',ref:'AA-123-BB',categorie:'Véhicule',souscat:'Poids lourd',dateValidite:addDays(today,85),organisme:'Contrôle technique',notes:''},
-    {id:uid(),nom:'Grue Liebherr LTM 1030',ref:'LBH-2018-03',categorie:'Engin',souscat:'Grue mobile',dateValidite:addDays(today,15),organisme:'Véritas',notes:''},
-    {id:uid(),nom:'Combinaison étanche — C003',ref:'DRS-C-0003',categorie:'EPI',souscat:'Combinaison',dateValidite:addDays(today,95),organisme:'',notes:''},
-    {id:uid(),nom:'Remorque plateau — AR-456-CD',ref:'AR-456-CD',categorie:'Véhicule',souscat:'Remorque',dateValidite:addDays(today,-5),organisme:'Contrôle technique',notes:''},
-    {id:uid(),nom:'Compresseur BAUER Oceanus',ref:'BAU-2022-01',categorie:'Plongée',souscat:'Compresseur',dateValidite:addDays(today,120),organisme:'BAUER service',notes:''},
+    {id:uid(),nom:'Bloc 12L — B047',ref:'UW-2019-047',rubrique:'plongee',souscat:'Bouteille',notes:''},
+    {id:uid(),nom:'Détendeur Mk25 — D012',ref:'SP-MK25-0012',rubrique:'plongee',souscat:'Détendeur',notes:''},
+    {id:uid(),nom:'Compresseur BAUER Oceanus',ref:'BAU-2022-01',rubrique:'plongee',souscat:'Compresseur',notes:''},
+    {id:uid(),nom:'ZOSTERA',ref:'C230296',rubrique:'navire',souscat:'Vedette',notes:''},
+    {id:uid(),nom:'Camion Iveco — AA-123-BB',ref:'AA-123-BB',rubrique:'vehicule',souscat:'Poids lourd',notes:''},
+    {id:uid(),nom:'Grue Liebherr LTM 1030',ref:'LBH-2018-03',rubrique:'grue',souscat:'Grue mobile',notes:''},
+  ];
+
+  const mid = DB.materiel.map(m=>m.id);
+  DB.certifications = [
+    {id:uid(),materielId:mid[0],nom:'Requalification',type:'Requalification',dateValidite:addDays(today,-10),organisme:'Bureau Veritas',notes:''},
+    {id:uid(),materielId:mid[1],nom:'Contrôle périodique',type:'Vérification périodique',dateValidite:addDays(today,22),organisme:'ScubaPro SAV',notes:''},
+    {id:uid(),materielId:mid[2],nom:'Contrôle périodique',type:'Vérification périodique',dateValidite:addDays(today,120),organisme:'BAUER service',notes:''},
+    {id:uid(),materielId:mid[3],nom:'Permis de navigation',type:'Permis / Titre',dateValidite:'illimite',organisme:'Ministère chargé de la Mer',notes:''},
+    {id:uid(),materielId:mid[3],nom:'Assurance',type:'Assurance',dateValidite:addDays(today,200),organisme:'XL Insurance',notes:''},
+    {id:uid(),materielId:mid[4],nom:'Contrôle technique',type:'Contrôle technique',dateValidite:addDays(today,85),organisme:'Contrôle technique',notes:''},
+    {id:uid(),materielId:mid[5],nom:'Vérification générale périodique',type:'Vérification périodique',dateValidite:addDays(today,15),organisme:'Véritas',notes:''},
   ];
 
   const pid = DB.personnel.map(p=>p.id);
@@ -748,7 +758,7 @@ function initDemoData() {
     if (p) p.qualifs.push(q.id);
   });
 
-  save('materiel'); save('personnel'); save('qualifications'); save('documents');
+  save('materiel'); save('certifications'); save('personnel'); save('qualifications'); save('documents');
   generateNotifications();
 }
 
@@ -757,10 +767,12 @@ function generateNotifications() {
   const alertDays = DB.settings.alertDays || 30;
   const today = new Date(); today.setHours(0,0,0,0);
 
-  [...DB.materiel].forEach(m => {
-    const {status, days} = getStatus(m.dateValidite);
-    if (status === 'expired') DB.notifications.push({id:uid(),type:'expired',title:`${m.nom} — Expiré`,sub:`Requalification dépassée de ${Math.abs(days)} jour(s)`,ref:m.id,cat:'materiel',read:false,date:new Date().toISOString()});
-    else if (status === 'soon') DB.notifications.push({id:uid(),type:'soon',title:`${m.nom}`,sub:`Expire dans ${days} jour(s)`,ref:m.id,cat:'materiel',read:false,date:new Date().toISOString()});
+  [...DB.certifications].forEach(c => {
+    const m = DB.materiel.find(x=>x.id===c.materielId);
+    const mnom = m ? m.nom : 'Matériel inconnu';
+    const {status, days} = getStatus(c.dateValidite);
+    if (status === 'expired') DB.notifications.push({id:uid(),type:'expired',title:`${c.nom} — ${mnom}`,sub:`Expiré depuis ${Math.abs(days)} jour(s)`,ref:c.materielId,cat:'materiel',read:false,date:new Date().toISOString()});
+    else if (status === 'soon') DB.notifications.push({id:uid(),type:'soon',title:`${c.nom} — ${mnom}`,sub:`Expire dans ${days} jour(s)`,ref:c.materielId,cat:'materiel',read:false,date:new Date().toISOString()});
   });
   [...DB.qualifications].forEach(q => {
     const p = DB.personnel.find(x=>x.id===q.personnelId);
@@ -802,6 +814,41 @@ function badgeFor(dateStr) {
   return `<span class="badge badge-gray">—</span>`;
 }
 
+// ---- Matériel ↔ certifications -----------------------------
+// Un matériel n'a pas de date propre : son état découle de ses certifications.
+function certifsOf(materielId) {
+  return DB.certifications.filter(c => c.materielId === materielId);
+}
+
+// Pire statut parmi les certifications : expiré > bientôt > ok > aucune
+function materielStatus(materielId) {
+  const cs = certifsOf(materielId);
+  if (!cs.length) return { status:'none', label:'Aucune certification', count:0 };
+  const order = { expired:0, soon:1, unknown:2, ok:3 };
+  let worst = cs[0], worstSt = getStatus(cs[0].dateValidite);
+  cs.forEach(c => {
+    const st = getStatus(c.dateValidite);
+    if (order[st.status] < order[worstSt.status]) { worst = c; worstSt = st; }
+  });
+  return { status:worstSt.status, label:worstSt.label, count:cs.length, date:worst.dateValidite, certif:worst };
+}
+
+function materielBadge(materielId) {
+  const s = materielStatus(materielId);
+  if (s.status === 'none') return `<span class="badge badge-gray">Aucune certification</span>`;
+  return badgeFor(s.date);
+}
+
+function rubriqueOf(m) {
+  if (m.rubrique) return m.rubrique;
+  // Repli pour les anciennes données encore en catégorie
+  const c = (m.categorie||'').toLowerCase(), s = (m.souscat||'').toLowerCase();
+  if (c.includes('bateau') || s.includes('bateau') || s.includes('navire')) return 'navire';
+  if (c.includes('véhicule') || c.includes('vehicule')) return 'vehicule';
+  if (c.includes('engin') || s.includes('grue')) return 'grue';
+  return 'plongee';
+}
+
 function catIcon(cat, souscat) {
   if (souscat) {
     const s = souscat.toLowerCase();
@@ -836,9 +883,9 @@ function showPage(page) {
   document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
   const nav = document.getElementById('nav-' + page);
   if (nav) nav.classList.add('active');
-  const titles = {dashboard:'Tableau de bord',alertes:'Alertes & Notifications',materiel:'Tout le matériel',plongee:'Matériel de plongée',vehicules:'Véhicules & Engins',personnel:'Gestion de l\'équipe',diplomes:'Diplômes & Aptitudes',documents:'Documents scannés',stats:'Statistiques'};
+  const titles = {dashboard:'Tableau de bord',alertes:'Alertes & Notifications',plongee:'Matériel de plongée',navire:'Navires',vehicule:'Véhicules',grue:'Grues',personnel:'Gestion de l\'équipe',documents:'Documents scannés',stats:'Statistiques'};
   document.getElementById('topbar-title').textContent = titles[page] || page;
-  const pages = {dashboard:renderDashboard,alertes:renderAlertes,materiel:()=>renderMaterielPage('all'),plongee:()=>renderMaterielPage('plongee'),vehicules:()=>renderMaterielPage('vehicules'),personnel:renderPersonnel,diplomes:renderDiplomes,documents:renderDocuments,stats:renderStats};
+  const pages = {dashboard:renderDashboard,alertes:renderAlertes,plongee:()=>renderMaterielPage('plongee'),navire:()=>renderMaterielPage('navire'),vehicule:()=>renderMaterielPage('vehicule'),grue:()=>renderMaterielPage('grue'),personnel:renderPersonnel,documents:renderDocuments,stats:renderStats};
   const fn = pages[page];
   if (fn) document.getElementById('page-content').innerHTML = fn();
   updateBadges();
@@ -859,7 +906,7 @@ function closeSidebar() {
 // ============================================================
 function renderDashboard() {
   generateNotifications();
-  const allItems = [...DB.materiel, ...DB.qualifications];
+  const allItems = [...DB.certifications, ...DB.qualifications];
   const expired = allItems.filter(x => getStatus(x.dateValidite).status === 'expired').length;
   const soon = allItems.filter(x => getStatus(x.dateValidite).status === 'soon').length;
   const ok = allItems.filter(x => getStatus(x.dateValidite).status === 'ok').length;
@@ -871,26 +918,30 @@ function renderDashboard() {
   const matRows = urgents.map(item => {
     const isQualif = !!item.personnelId;
     const p = isQualif ? DB.personnel.find(x=>x.id===item.personnelId) : null;
-    return `<tr>
-      <td><div class="td-name">${item.nom || item.type}</div><div class="td-sub">${isQualif && p ? '👤 '+p.nom : (item.ref||'')}</div></td>
-      <td><span class="cat-chip">${catIcon(item.categorie||item.type)} ${item.categorie||item.type}</span></td>
+    const mat = !isQualif ? DB.materiel.find(x=>x.id===item.materielId) : null;
+    const rub = mat ? (RUBRIQUES[rubriqueOf(mat)] || RUBRIQUES.plongee) : null;
+    const onClick = isQualif
+      ? (p ? `openDetailPersonnel('${p.id}')` : '')
+      : (mat ? `openDetailMateriel('${mat.id}')` : '');
+    return `<tr onclick="${onClick}" style="cursor:${onClick?'pointer':'default'}">
+      <td><div class="td-name">${item.nom || item.type}</div><div class="td-sub">${isQualif && p ? '👤 '+p.nom : (mat ? rub.icon+' '+mat.nom : '')}</div></td>
+      <td><span class="cat-chip">${isQualif ? catIcon(item.type)+' '+item.type : (rub?rub.icon+' '+rub.label:item.type||'—')}</span></td>
       <td>${fmtDate(item.dateValidite)}</td>
       <td>${badgeFor(item.dateValidite)}</td>
       <td>${item.organisme||'—'}</td>
     </tr>`;
   }).join('');
 
-  // Conformité par catégorie
-  const cats = ['Bouteille','Plongée','Véhicule','Engin','EPI','Bateau'];
-  const catStats = cats.map(cat => {
-    const items = DB.materiel.filter(m=>m.categorie===cat);
+  // Conformité par rubrique de matériel
+  const catStats = Object.entries(RUBRIQUES).map(([key, R]) => {
+    const items = DB.materiel.filter(m=>rubriqueOf(m)===key);
     if (!items.length) return null;
-    const ok = items.filter(m=>getStatus(m.dateValidite).status==='ok').length;
-    const pct = Math.round((ok/items.length)*100);
+    const okCount = items.filter(m=>materielStatus(m.id).status==='ok').length;
+    const pct = Math.round((okCount/items.length)*100);
     const color = pct>=80?'var(--green)':pct>=50?'var(--amber)':'var(--red)';
-    return `<div style="margin-bottom:12px">
+    return `<div style="margin-bottom:12px;cursor:pointer" onclick="showPage('${key}')">
       <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
-        <span style="color:var(--text2)">${catIcon(cat)} ${cat}</span>
+        <span style="color:var(--text2)">${R.icon} ${R.label} <span style="color:var(--text3)">(${items.length})</span></span>
         <span style="font-weight:600;color:${color}">${pct}%</span>
       </div>
       <div class="progress-bar"><div class="progress-fill" style="width:${pct}%;background:${color}"></div></div>
@@ -917,14 +968,14 @@ function renderDashboard() {
       </table></div>` : '<div class="card" style="text-align:center;padding:30px;color:var(--green2)">✅ Aucune urgence — Tout est à jour !</div>'}
     </div>
     <div>
-      <div class="section-title">📊 Conformité par catégorie</div>
+      <div class="section-title">📊 Conformité par rubrique</div>
       <div class="card">${catStats || '<div class="empty-sub">Aucune donnée</div>'}</div>
       <div style="margin-top:14px">
         <div class="section-title">⚡ Actions rapides</div>
         <div style="display:flex;flex-direction:column;gap:8px">
-          <button class="btn btn-ghost" style="justify-content:flex-start" onclick="openAddMateriel()">➕ Ajouter du matériel</button>
+          <button class="btn btn-ghost" style="justify-content:flex-start" onclick="openAddMateriel('plongee')">🤿 Ajouter du matériel de plongée</button>
+          <button class="btn btn-ghost" style="justify-content:flex-start" onclick="openAddMateriel('navire')">⛵ Ajouter un navire</button>
           <button class="btn btn-ghost" style="justify-content:flex-start" onclick="openAddPersonnel()">👤 Ajouter un agent</button>
-          <button class="btn btn-ghost" style="justify-content:flex-start" onclick="openAddQualif(null)">🎓 Ajouter une qualification</button>
           <button class="btn btn-ghost" style="justify-content:flex-start" onclick="showPage('documents')">📄 Importer un document</button>
         </div>
       </div>
@@ -940,16 +991,21 @@ function renderAlertes() {
   const expired = DB.notifications.filter(n=>n.type==='expired');
   const soon = DB.notifications.filter(n=>n.type==='soon');
 
-  const renderNotifs = (list) => list.map(n => `
-    <div class="notif-item ${n.read?'':'unread'}">
+  const renderNotifs = (list) => list.map(n => {
+    const open = n.cat === 'materiel'
+      ? (DB.materiel.some(m=>m.id===n.ref) ? `openDetailMateriel('${n.ref}')` : '')
+      : (() => { const q = DB.qualifications.find(x=>x.id===n.ref); return q && q.personnelId ? `openDetailPersonnel('${q.personnelId}')` : ''; })();
+    return `
+    <div class="notif-item ${n.read?'':'unread'}" ${open?`onclick="${open}" style="cursor:pointer"`:''}>
       <span class="notif-icon">${n.type==='expired'?'🔴':'🟡'}</span>
       <div class="notif-body">
         <div class="notif-title">${n.title}</div>
         <div class="notif-sub">${n.sub}</div>
         <div class="notif-time">${n.cat==='materiel'?'Matériel':'Qualification personnel'}</div>
       </div>
-      <button class="btn btn-ghost btn-sm" onclick="markRead('${n.id}')">✓</button>
-    </div>`).join('');
+      <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();markRead('${n.id}')">✓</button>
+    </div>`;
+  }).join('');
 
   return `
   <div class="page-header">
@@ -1030,82 +1086,96 @@ async function deleteApiKey() {
 // ============================================================
 // MATERIEL
 // ============================================================
-function renderMaterielPage(filter) {
-  let items = DB.materiel;
-  let title = 'Tout le matériel';
-  if (filter==='plongee') { items = items.filter(m=>['Bouteille','Plongée','EPI'].includes(m.categorie)); title='Matériel de plongée'; }
-  if (filter==='vehicules') { items = items.filter(m=>['Véhicule','Engin','Bateau'].includes(m.categorie)); title='Véhicules & Engins'; }
+function renderMaterielPage(rubrique) {
+  const R = RUBRIQUES[rubrique] || RUBRIQUES.plongee;
+  const items = DB.materiel.filter(m => rubriqueOf(m) === rubrique);
 
-  const cats = ['Tous','Bouteille','Plongée','EPI','Véhicule','Engin','Bateau','Autre'];
-  const rows = items.map(m => `
+  const expired = items.filter(m => materielStatus(m.id).status === 'expired').length;
+  const soon    = items.filter(m => materielStatus(m.id).status === 'soon').length;
+  const sansCertif = items.filter(m => materielStatus(m.id).status === 'none').length;
+
+  const rows = items.map(m => {
+    const st = materielStatus(m.id);
+    const certLabel = st.count === 0
+      ? '<span style="color:var(--text3);font-size:12px">—</span>'
+      : `<span class="cat-chip">${st.count} certification${st.count>1?'s':''}</span>`;
+    const prochaine = st.count === 0 ? '—' : fmtDate(st.date);
+    return `
     <tr onclick="openDetailMateriel('${m.id}')" style="cursor:pointer">
-      <td><div class="td-name">${m.nom}</div><div class="td-sub">${m.ref||''}</div></td>
-      <td><span class="cat-chip">${catIcon(m.categorie, m.souscat)} ${m.categorie}</span></td>
+      <td><div class="td-name">${m.nom||'—'}</div><div class="td-sub">${m.ref||''}</div></td>
       <td>${m.souscat||'—'}</td>
-      <td>${fmtDate(m.dateValidite)}</td>
-      <td>${badgeFor(m.dateValidite)}</td>
-      <td>${m.organisme||'—'}</td>
+      <td>${certLabel}</td>
+      <td>${prochaine}</td>
+      <td>${materielBadge(m.id)}</td>
       <td onclick="event.stopPropagation()" style="white-space:nowrap">
-        <button class="btn btn-ghost btn-sm" onclick="openEditMateriel('${m.id}')">✏️</button>
-        <button class="btn btn-danger btn-sm" onclick="deleteMateriel('${m.id}')">🗑</button>
+        <button class="btn btn-ghost btn-sm" title="Ajouter une certification" onclick="openAddCertif('${m.id}')">➕</button>
+        <button class="btn btn-ghost btn-sm" title="Modifier" onclick="openEditMateriel('${m.id}')">✏️</button>
+        <button class="btn btn-danger btn-sm" title="Supprimer" onclick="deleteMateriel('${m.id}')">🗑</button>
       </td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('');
 
   return `
   <div class="page-header">
-    <div><div class="page-title">${title}</div><div class="page-sub">${items.length} équipement${items.length>1?'s':''}</div></div>
+    <div>
+      <div class="page-title">${R.icon} ${R.label}</div>
+      <div class="page-sub">${items.length} ${R.singulier}${items.length>1?'s':''}${expired?` · ${expired} en alerte`:''}</div>
+    </div>
     <div class="header-actions">
       <button class="btn btn-ghost" onclick="exportExcel('materiel')">⬇️ Export Excel</button>
-      <button class="btn btn-primary" onclick="openAddMateriel()">➕ Ajouter</button>
+      <button class="btn btn-primary" onclick="openAddMateriel('${rubrique}')">➕ Ajouter</button>
     </div>
   </div>
-  ${items.length ? `<div class="table-wrap"><table>
-    <thead><tr><th>Désignation / Référence</th><th>Catégorie</th><th>Type</th><th>Validité</th><th>Statut</th><th>Organisme</th><th>Actions</th></tr></thead>
+  ${items.length ? `
+  <div class="stats-grid" style="margin-bottom:20px">
+    <div class="stat-card red"><span class="stat-icon">🚨</span><div class="stat-num red">${expired}</div><div class="stat-label">Expirés</div></div>
+    <div class="stat-card amber"><span class="stat-icon">⏳</span><div class="stat-num amber">${soon}</div><div class="stat-label">Expirent bientôt</div></div>
+    <div class="stat-card green"><span class="stat-icon">✅</span><div class="stat-num green">${items.length-expired-soon-sansCertif}</div><div class="stat-label">À jour</div></div>
+    <div class="stat-card blue"><span class="stat-icon">📋</span><div class="stat-num blue">${sansCertif}</div><div class="stat-label">Sans certification</div></div>
+  </div>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Désignation / Référence</th><th>Type</th><th>Certifications</th><th>Prochaine échéance</th><th>Statut</th><th>Actions</th></tr></thead>
     <tbody>${rows}</tbody>
-  </table></div>` : `<div class="empty"><div class="empty-icon">🔧</div><div class="empty-text">Aucun matériel</div><div class="empty-sub">Cliquez sur "Ajouter" pour commencer</div></div>`}`;
+  </table></div>` : `<div class="empty"><div class="empty-icon">${R.icon}</div><div class="empty-text">Aucun ${R.singulier} enregistré</div><div class="empty-sub">Cliquez sur "Ajouter" pour commencer</div></div>`}`;
 }
 
-function openAddMateriel(id) {
+function openAddMateriel(rubrique, id) {
   const m = id ? DB.materiel.find(x=>x.id===id) : null;
-  document.getElementById('modal-title').textContent = m ? 'Modifier le matériel' : 'Ajouter du matériel';
+  const rub = m ? rubriqueOf(m) : (rubrique || currentPage);
+  const R = RUBRIQUES[rub] || RUBRIQUES.plongee;
+  const placeholders = {
+    plongee:  'Ex : Casque Kirby Morgan KMB28B',
+    navire:   'Ex : ZOSTERA',
+    vehicule: 'Ex : Camion Iveco',
+    grue:     'Ex : Grue Liebherr LTM 1030',
+  };
+  const sousTypes = {
+    plongee:  'Ex : Détendeur, Compresseur, Narguillé...',
+    navire:   'Ex : Vedette, Semi-rigide, Barge...',
+    vehicule: 'Ex : Poids lourd, Fourgon, Remorque...',
+    grue:     'Ex : Grue mobile, Grue auxiliaire...',
+  };
+  document.getElementById('modal-title').textContent = m ? `Modifier — ${R.singulier}` : `${R.icon} Ajouter un ${R.singulier}`;
   document.getElementById('modal-body').innerHTML = `
-  <div style="margin-bottom:16px">
-    <div class="scan-zone" onclick="document.getElementById('file-scan-mat').click()">
-      <span class="scan-zone-icon">📷</span>
-      <p>Scanner / importer un document de requalification</p>
-      <p class="scan-hint">Photo, PDF, Word, Excel — L'IA lit les informations automatiquement</p>
-      <span class="ai-badge">✨ Analyse IA incluse</span>
-    </div>
-    <input type="file" id="file-scan-mat" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" style="display:none" onchange="handleFileScan(event,'mat')">
-    <div id="scan-result-mat" style="display:none" class="card card-sm" style="margin-top:8px"></div>
-  </div>
   <div class="form-grid">
-    <div class="field field-full"><label>Nom / désignation *</label><input id="mat-nom" value="${m?.nom||''}" placeholder="Ex : Bloc 12L — B047"></div>
+    <div class="field field-full"><label>Nom / désignation *</label><input id="mat-nom" value="${m?.nom||''}" placeholder="${placeholders[rub]||''}"></div>
     <div class="field"><label>Référence / N° de série</label><input id="mat-ref" value="${m?.ref||''}" placeholder="Ex : UW-2024-047"></div>
-    <div class="field"><label>Catégorie *</label><select id="mat-cat">
-      ${['Bouteille','Plongée','EPI','Véhicule','Engin','Bateau','Autre'].map(c=>`<option value="${c}" ${m?.categorie===c?'selected':''}>${catIcon(c)} ${c}</option>`).join('')}
+    <div class="field"><label>Rubrique *</label><select id="mat-rubrique">
+      ${Object.entries(RUBRIQUES).map(([k,v])=>`<option value="${k}" ${rub===k?'selected':''}>${v.icon} ${v.label}</option>`).join('')}
     </select></div>
-    <div class="field"><label>Sous-type</label><input id="mat-souscat" value="${m?.souscat||''}" placeholder="Ex : Détendeur, Camion, Grue..."></div>
-    <div class="field"><label>Date de fin de validité *</label>
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-        <button type="button" id="mat-toggle-illimite" onclick="toggleIllimite('mat')"
-          style="padding:6px 12px;border-radius:8px;font-size:12px;border:1px solid var(--border);background:${m?.dateValidite==='illimite'?'var(--blue)':'var(--surface2)'};color:${m?.dateValidite==='illimite'?'#fff':'var(--text2)'};cursor:pointer;white-space:nowrap">
-          ♾️ Illimité
-        </button>
-        <input type="date" id="mat-date" value="${m?.dateValidite && m.dateValidite!=='illimite' ? m.dateValidite : ''}"
-          style="flex:1;display:${m?.dateValidite==='illimite'?'none':'block'}">
-        <span id="mat-illimite-label" style="display:${m?.dateValidite==='illimite'?'block':'none'};color:var(--blue2);font-size:14px;font-weight:500">♾️ Pas de date d'expiration</span>
-      </div>
-    </div>
-    <div class="field"><label>Organisme certificateur</label><input id="mat-org" value="${m?.organisme||''}" placeholder="Ex : Bureau Veritas, APAVE..."></div>
+    <div class="field field-full"><label>Sous-type</label><input id="mat-souscat" value="${m?.souscat||''}" placeholder="${sousTypes[rub]||''}"></div>
     <div class="field field-full"><label>Notes</label><textarea id="mat-notes">${m?.notes||''}</textarea></div>
+  </div>
+  <div style="margin-top:14px;padding:12px 14px;background:var(--surface2);border-radius:10px;font-size:12.5px;color:var(--text3);line-height:1.5">
+    💡 Les dates de validité se gèrent par <strong style="color:var(--text2)">certification</strong>.
+    Après l'enregistrement, ajoutez-en autant que nécessaire depuis la fiche (requalification, contrôle technique, assurance…).
   </div>`;
   document.getElementById('modal-footer').innerHTML = `
     <button class="btn btn-ghost" onclick="closeModal('modal-main')">Annuler</button>
     <button class="btn btn-primary" onclick="saveMateriel('${id||''}')">💾 Enregistrer</button>`;
   openModal('modal-main');
 }
-function openEditMateriel(id) { openAddMateriel(id); }
+function openEditMateriel(id) { openAddMateriel(null, id); }
 
 function toggleIllimite(prefix) {
   const btn = document.getElementById(prefix + '-toggle-illimite');
@@ -1137,32 +1207,42 @@ function getDateOrIllimite(prefix) {
 
 function saveMateriel(id) {
   const nom = document.getElementById('mat-nom').value.trim();
-  const date = getDateOrIllimite('mat');
-  if (!nom || !date) { alert('Nom et date (ou Illimité) requis'); return; }
+  if (!nom) { alert('Le nom est requis'); return; }
   const data = {
     nom, ref:document.getElementById('mat-ref').value.trim(),
-    categorie:document.getElementById('mat-cat').value,
+    rubrique:document.getElementById('mat-rubrique').value,
     souscat:document.getElementById('mat-souscat').value.trim(),
-    dateValidite:date,
-    organisme:document.getElementById('mat-org').value.trim(),
     notes:document.getElementById('mat-notes').value.trim(),
   };
+  let savedId = id;
   if (id) {
     const idx = DB.materiel.findIndex(x=>x.id===id);
     if (idx>=0) DB.materiel[idx] = {...DB.materiel[idx],...data};
-  } else { DB.materiel.push({id:uid(),...data}); }
+  } else {
+    savedId = uid();
+    DB.materiel.push({id:savedId,...data});
+  }
   save('materiel');
-  const savedMat = id ? DB.materiel.find(x=>x.id===id) : DB.materiel[DB.materiel.length-1];
+  const savedMat = DB.materiel.find(x=>x.id===savedId);
   syncUpsert('materiel', savedMat);
-  closeModal('modal-main'); showPage(currentPage);
+  closeModal('modal-main');
+  showPage(data.rubrique);
+  // Nouveau matériel : on enchaîne directement sur sa fiche pour ajouter les certifications
+  if (!id) openDetailMateriel(savedId);
 }
 
 function deleteMateriel(id) {
   const m = DB.materiel.find(x=>x.id===id);
-  confirmDelete(m ? `"${m.nom||m.ref||'cet équipement'}"` : 'cet équipement', () => {
+  const certifs = certifsOf(id);
+  const label = m ? `"${m.nom||m.ref||'cet équipement'}"${certifs.length?` et ses ${certifs.length} certification${certifs.length>1?'s':''}`:''}` : 'cet équipement';
+  confirmDelete(label, () => {
+    certifs.forEach(c => syncDelete('certifications', c.id));
+    DB.certifications = DB.certifications.filter(c => c.materielId !== id);
     DB.materiel = DB.materiel.filter(x=>x.id!==id);
-    save('materiel');
+    save('certifications'); save('materiel');
     syncDelete('materiel', id);
+    closeModal('modal-detail');
+    generateNotifications(); updateBadges();
     showPage(currentPage);
   });
 }
@@ -1170,71 +1250,181 @@ function deleteMateriel(id) {
 function openDetailMateriel(id) {
   const m = DB.materiel.find(x=>x.id===id);
   if (!m) return;
-  const docs = DB.documents.filter(d=>d.refId===id);
-  document.getElementById('detail-title').textContent = m.nom;
+  const rub = rubriqueOf(m);
+  const R = RUBRIQUES[rub] || RUBRIQUES.plongee;
+  const certifs = certifsOf(id);
+
+  const cRows = certifs.map(c => {
+    const linkedDoc = c.docId ? DB.documents.find(d=>d.id===c.docId) : null;
+    const docUrl = linkedDoc?.url || linkedDoc?.dataUrl || null;
+    const typeCell = docUrl
+      ? `<span class="cat-chip" onclick="event.stopPropagation();openDocFromQualif('${linkedDoc.id}')" style="cursor:pointer;border:1px solid var(--blue2)" title="Cliquer pour ouvrir le document">${c.type||'Certification'} 📎</span>`
+      : `<span class="cat-chip" onclick="event.stopPropagation();openDocMenuCertif('${c.id}','${id}')" style="cursor:pointer;opacity:0.7;border:1px dashed var(--border2)" title="Ajouter un document">${c.type||'Certification'} ＋</span>`;
+    const docBtn = linkedDoc
+      ? `<button class="btn btn-ghost btn-sm" title="Document attaché — cliquer pour remplacer" onclick="event.stopPropagation();openDocMenuCertif('${c.id}','${id}')" style="color:var(--blue2)">🔗</button>`
+      : `<button class="btn btn-ghost btn-sm" title="Ajouter un document" onclick="event.stopPropagation();openDocMenuCertif('${c.id}','${id}')">📎</button>`;
+    return `
+    <tr>
+      <td><div class="td-name">${c.nom}</div></td>
+      <td>${typeCell}</td>
+      <td>${fmtDate(c.dateValidite)}</td>
+      <td>${badgeFor(c.dateValidite)}</td>
+      <td>${c.organisme||'—'}</td>
+      <td onclick="event.stopPropagation()" style="white-space:nowrap">
+        ${docBtn}
+        <button class="btn btn-ghost btn-sm" onclick="openAddCertif('${id}','${c.id}')">✏️</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteCertif('${c.id}','${id}')">🗑</button>
+      </td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('detail-title').innerHTML = `<div style="display:flex;align-items:center;gap:12px"><span style="font-size:26px">${R.icon}</span>${m.nom||'—'}</div>`;
   document.getElementById('detail-body').innerHTML = `
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
-    <div class="card card-sm"><div style="font-size:11px;color:var(--text3);margin-bottom:4px">Référence</div><div style="font-weight:500">${m.ref||'—'}</div></div>
-    <div class="card card-sm"><div style="font-size:11px;color:var(--text3);margin-bottom:4px">Catégorie</div><div>${catIcon(m.categorie, m.souscat)} ${m.categorie} ${m.souscat?'· '+m.souscat:''}</div></div>
-    <div class="card card-sm"><div style="font-size:11px;color:var(--text3);margin-bottom:4px">Validité</div><div style="font-weight:500">${fmtDate(m.dateValidite)}</div></div>
-    <div class="card card-sm"><div style="font-size:11px;color:var(--text3);margin-bottom:4px">Statut</div>${badgeFor(m.dateValidite)}</div>
-    <div class="card card-sm field-full" style="grid-column:1/-1"><div style="font-size:11px;color:var(--text3);margin-bottom:4px">Organisme</div><div>${m.organisme||'—'}</div></div>
-    ${m.notes?`<div class="card card-sm" style="grid-column:1/-1"><div style="font-size:11px;color:var(--text3);margin-bottom:4px">Notes</div><div style="font-size:13px;color:var(--text2)">${m.notes}</div></div>`:''}
+  <div style="display:flex;gap:10px;margin-bottom:20px;flex-wrap:wrap">
+    ${m.ref?`<span class="badge badge-gray">🔖 ${m.ref}</span>`:''}
+    <span class="badge badge-blue">${R.icon} ${R.label}</span>
+    ${m.souscat?`<span class="badge badge-gray">${m.souscat}</span>`:''}
   </div>
-  <div class="section-title">📁 Documents liés (${docs.length})</div>
-  ${docs.length ? docs.map(d=>{
-    const fileUrl = d.url || d.dataUrl || null;
-    return `<div class="doc-item" onclick="${fileUrl ? `openDocFromQualif('${d.id}')` : ''}" style="cursor:${fileUrl?'pointer':'default'}">
-      <span class="doc-icon">${d.type==='pdf'?'📕':d.type==='image'?'🖼️':'📄'}</span>
-      <span class="doc-name">${d.nom}</span>
-      <span class="doc-size">${d.date||''}</span>
-      ${fileUrl ? `<span style="color:var(--blue2);font-size:11px">👁 Ouvrir</span>` : ''}
-      <button class="btn btn-danger btn-sm" style="margin-left:auto;padding:2px 8px;font-size:11px" onclick="event.stopPropagation();deleteDoc('${d.id}',{type:'materiel',entityId:'${id}'})">🗑</button>
-    </div>`;
-  }).join('') : '<div style="color:var(--text3);font-size:13px">Aucun document lié</div>'}
-  <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
-    <button class="btn btn-primary btn-sm" onclick="openScanDocForEntity('materiel','${id}')">📷 Scanner (analyse IA)</button>
-    <button class="btn btn-ghost btn-sm" onclick="openUploadDoc('${id}')">📎 Importer manuel</button>
-    ${DB.documents.filter(d=>d.refId!==id).length ? `<button class="btn btn-ghost btn-sm" onclick="pickExistingDocForMateriel('${id}')">🔗 Lier existant</button>` : ''}
-  </div>`;
+  ${m.notes?`<div class="card card-sm" style="margin-bottom:18px"><div style="font-size:11px;color:var(--text3);margin-bottom:4px">Notes</div><div style="font-size:13px;color:var(--text2)">${m.notes}</div></div>`:''}
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+    <div class="section-title" style="margin-bottom:0">Certifications (${certifs.length})</div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-ghost btn-sm" onclick="closeModal('modal-detail');openAddCertif('${id}')">➕ Ajouter</button>
+    </div>
+  </div>
+  ${certifs.length ? `<div class="table-wrap"><table>
+    <thead><tr><th>Certification</th><th>Type</th><th>Validité</th><th>Statut</th><th>Organisme</th><th>Actions</th></tr></thead>
+    <tbody>${cRows}</tbody>
+  </table></div>` : '<div style="color:var(--text3);font-size:13px;padding:16px 0">Aucune certification enregistrée</div>'}`;
   document.getElementById('detail-footer').innerHTML = `
     <button class="btn btn-ghost" onclick="closeModal('modal-detail')">Fermer</button>
-    <button class="btn btn-primary" onclick="closeModal('modal-detail');openEditMateriel('${id}')">✏️ Modifier</button>`;
+    <button class="btn btn-ghost" onclick="closeModal('modal-detail');openEditMateriel('${id}')">✏️ Modifier</button>
+    <button class="btn btn-danger" onclick="deleteMateriel('${id}')">🗑 Supprimer</button>`;
   openModal('modal-detail');
 }
 
-function pickExistingDocForMateriel(materielId) {
-  const available = DB.documents.filter(d => d.refId !== materielId);
-  if (!available.length) { alert('Aucun autre document disponible'); return; }
-  document.getElementById('modal-title').textContent = 'Lier un document existant';
+// ---- Certifications d'un matériel ---------------------------
+const CERTIF_TYPES = ['Requalification','Vérification périodique','Contrôle technique','Assurance','Permis / Titre','Autre'];
+
+function openAddCertif(materielId, certifId) {
+  const m = DB.materiel.find(x=>x.id===materielId);
+  const c = certifId ? DB.certifications.find(x=>x.id===certifId) : null;
+  if (!m) return;
+  document.getElementById('modal-title').textContent = c ? 'Modifier la certification' : 'Ajouter une certification';
   document.getElementById('modal-body').innerHTML = `
-    <div style="font-size:13px;color:var(--text2);margin-bottom:12px">Choisissez un document à lier à cet équipement :</div>
-    <div style="display:flex;flex-direction:column;gap:8px;max-height:300px;overflow-y:auto">
-      ${available.map(d=>`
-        <div onclick="linkExistingDocToMateriel('${materielId}','${d.id}')"
-          style="display:flex;align-items:center;gap:10px;padding:10px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;cursor:pointer"
-          onmouseover="this.style.borderColor='var(--blue2)'" onmouseout="this.style.borderColor='var(--border)'">
-          <span style="font-size:20px">${d.type==='pdf'?'📕':d.type==='image'?'🖼️':'📄'}</span>
-          <div>
-            <div style="font-size:13px;font-weight:500">${d.nom}</div>
-            <div style="font-size:11px;color:var(--text3)">${d.refNom||'Non lié'} · ${d.date||''}</div>
-          </div>
-        </div>`).join('')}
-    </div>`;
-  document.getElementById('modal-footer').innerHTML = `<button class="btn btn-ghost" onclick="closeModal('modal-main')">Annuler</button>`;
+  <div style="font-size:13px;color:var(--text3);margin-bottom:16px;text-align:center">${m.nom}</div>
+  <div class="form-grid">
+    <div class="field"><label>Type *</label><select id="c-type">
+      ${CERTIF_TYPES.map(t=>`<option value="${t}" ${c?.type===t?'selected':''}>${t}</option>`).join('')}
+    </select></div>
+    <div class="field"><label>Nom / Intitulé *</label><input id="c-nom" value="${c?.nom||''}" placeholder="Ex : Contrôle périodique"></div>
+    <div class="field"><label>Date de fin de validité *</label>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <button type="button" id="c-toggle-illimite" onclick="toggleIllimite('c')"
+          style="padding:6px 12px;border-radius:8px;font-size:12px;border:1px solid var(--border);background:${c?.dateValidite==='illimite'?'var(--blue)':'var(--surface2)'};color:${c?.dateValidite==='illimite'?'#fff':'var(--text2)'};cursor:pointer;white-space:nowrap">
+          ♾️ Illimité
+        </button>
+        <input type="date" id="c-date" value="${c?.dateValidite && c.dateValidite!=='illimite' ? c.dateValidite : ''}"
+          style="flex:1;display:${c?.dateValidite==='illimite'?'none':'block'}">
+        <span id="c-illimite-label" style="display:${c?.dateValidite==='illimite'?'block':'none'};color:var(--blue2);font-size:14px;font-weight:500">♾️ Pas de date d'expiration</span>
+      </div>
+    </div>
+    <div class="field"><label>Organisme certificateur</label><input id="c-org" value="${c?.organisme||''}" placeholder="Ex : Bureau Veritas, APAVE..."></div>
+    <div class="field field-full"><label>Notes</label><textarea id="c-notes">${c?.notes||''}</textarea></div>
+  </div>`;
+  document.getElementById('modal-footer').innerHTML = `
+    <button class="btn btn-ghost" onclick="closeModal('modal-main');openDetailMateriel('${materielId}')">Annuler</button>
+    <button class="btn btn-primary" onclick="saveCertif('${materielId}','${certifId||''}')">💾 Enregistrer</button>`;
   openModal('modal-main');
 }
 
-function linkExistingDocToMateriel(materielId, docId) {
-  const doc = DB.documents.find(d=>d.id===docId);
-  const m = DB.materiel.find(x=>x.id===materielId);
-  if (!doc || !m) return;
-  doc.refId = materielId;
-  doc.refNom = m.nom;
-  save('documents');
-  syncUpsert('documents', doc);
+function saveCertif(materielId, certifId) {
+  const nom = document.getElementById('c-nom').value.trim();
+  const date = getDateOrIllimite('c');
+  if (!nom || !date) { alert('Nom et date (ou Illimité) requis'); return; }
+  const data = {
+    materielId,
+    nom,
+    type: document.getElementById('c-type').value,
+    dateValidite: date,
+    organisme: document.getElementById('c-org').value.trim(),
+    notes: document.getElementById('c-notes').value.trim(),
+  };
+  let savedId = certifId;
+  if (certifId) {
+    const idx = DB.certifications.findIndex(x=>x.id===certifId);
+    if (idx>=0) DB.certifications[idx] = {...DB.certifications[idx],...data};
+  } else {
+    savedId = uid();
+    DB.certifications.push({id:savedId,...data});
+  }
+  save('certifications');
+  syncUpsert('certifications', DB.certifications.find(x=>x.id===savedId));
+  generateNotifications(); updateBadges();
   closeModal('modal-main');
+  showPage(currentPage);
   openDetailMateriel(materielId);
+}
+
+// Les imports IA renvoient un item plat (nom, ref, rubrique, dateValidite, organisme).
+// On le découpe en matériel (son identité) + certification (son échéance).
+function mapToRubrique(cat, souscat) {
+  const c = (cat||'').toLowerCase(), s = (souscat||'').toLowerCase();
+  if (RUBRIQUES[c]) return c;
+  if (c.includes('bateau')||c.includes('navire')||s.includes('bateau')||s.includes('navire')||s.includes('vedette')||s.includes('zodiac')) return 'navire';
+  if (c.includes('grue')||s.includes('grue')||c.includes('engin')) return 'grue';
+  if (c.includes('véhicule')||c.includes('vehicule')||c.includes('camion')||s.includes('camion')||s.includes('remorque')||s.includes('fourgon')) return 'vehicule';
+  return 'plongee';
+}
+
+function applyMaterielItem(item, docId) {
+  const matData = {
+    nom: item.nom||'Sans nom',
+    ref: item.ref||'',
+    rubrique: mapToRubrique(item.rubrique||item.categorie, item.souscat),
+    souscat: item.souscat||'',
+    notes: item.notes||'',
+  };
+  let materielId, created = false;
+  const idx = item.matchId ? DB.materiel.findIndex(m=>m.id===item.matchId) : -1;
+  if (item.action === 'update' && idx >= 0) {
+    materielId = item.matchId;
+    DB.materiel[idx] = {...DB.materiel[idx], ...matData};
+    syncUpsert('materiel', DB.materiel[idx]);
+  } else {
+    materielId = uid();
+    DB.materiel.push({id:materielId, ...matData});
+    syncUpsert('materiel', DB.materiel.find(m=>m.id===materielId));
+    created = true;
+  }
+  // La date détectée devient une certification du matériel
+  if (item.dateValidite) {
+    const certNom = item.certification || 'Contrôle périodique';
+    const cData = {
+      materielId, nom: certNom,
+      type: item.typeCertif || 'Vérification périodique',
+      dateValidite: item.dateValidite,
+      organisme: item.organisme||'', notes: '',
+    };
+    if (docId) cData.docId = docId;
+    const existing = DB.certifications.find(c => c.materielId===materielId && c.nom===certNom);
+    if (existing) { Object.assign(existing, cData); syncUpsert('certifications', existing); }
+    else { const nc = {id:uid(), ...cData}; DB.certifications.push(nc); syncUpsert('certifications', nc); }
+  }
+  return { materielId, created };
+}
+
+function deleteCertif(certifId, materielId) {
+  const c = DB.certifications.find(x=>x.id===certifId);
+  confirmDelete(c ? `"${c.nom}"` : 'cette certification', () => {
+    DB.certifications = DB.certifications.filter(x=>x.id!==certifId);
+    save('certifications');
+    syncDelete('certifications', certifId);
+    generateNotifications(); updateBadges();
+    closeModal('modal-detail');
+    showPage(currentPage);
+    if (materielId) openDetailMateriel(materielId);
+  });
 }
 
 // ============================================================
@@ -1380,42 +1570,6 @@ function deletePersonnel(id) {
 // ============================================================
 // QUALIFICATIONS
 // ============================================================
-function renderDiplomes() {
-  const types = ['Tous','Aptitude médicale','Diplôme','Permis / Habilitation','Formation'];
-  const rows = DB.qualifications.map(q => {
-    const p = DB.personnel.find(x=>x.id===q.personnelId);
-    const linkedDoc = q.docId ? DB.documents.find(d=>d.id===q.docId) : null;
-    const docUrl = linkedDoc?.url || linkedDoc?.dataUrl || null;
-    const typeCell = docUrl
-      ? `<span class="cat-chip" onclick="event.stopPropagation();openDocFromQualif('${linkedDoc.id}')" style="cursor:pointer;border:1px solid var(--blue2)" title="Cliquer pour ouvrir le document">${catIcon(q.type)} ${q.type} 📎</span>`
-      : `<span class="cat-chip" onclick="event.stopPropagation();attachDocToQualif('${q.id}',null)" style="cursor:pointer;opacity:0.7;border:1px dashed var(--border2)" title="Cliquer pour attacher un document">${catIcon(q.type)} ${q.type} ＋</span>`;
-    return `<tr>
-      <td><div class="td-name">${q.nom}</div><div class="td-sub">${q.organisme||''}</div></td>
-      <td>${typeCell}</td>
-      <td><div style="display:flex;align-items:center;gap:8px"><div class="person-avatar" style="background:${p?.color||'var(--blue)'};width:24px;height:24px;font-size:10px;flex-shrink:0">${p?.nom.split(' ').map(x=>x[0]).join('').slice(0,2).toUpperCase()||'?'}</div><span>${p?.nom||'—'}</span></div></td>
-      <td>${fmtDate(q.dateValidite)}</td>
-      <td>${badgeFor(q.dateValidite)}</td>
-      <td onclick="event.stopPropagation()" style="white-space:nowrap">
-        <button class="btn btn-ghost btn-sm" onclick="openAddQualif('${q.personnelId}','${q.id}')">✏️</button>
-        <button class="btn btn-danger btn-sm" onclick="deleteQualif('${q.id}',null)">🗑</button>
-      </td>
-    </tr>`;
-  }).join('');
-
-  return `
-  <div class="page-header">
-    <div><div class="page-title">Diplômes & Aptitudes</div><div class="page-sub">${DB.qualifications.length} qualification${DB.qualifications.length>1?'s':''}</div></div>
-    <div class="header-actions">
-      <button class="btn btn-ghost" onclick="exportExcel('qualifications')">⬇️ Export</button>
-      <button class="btn btn-primary" onclick="openAddQualif(null)">➕ Ajouter</button>
-    </div>
-  </div>
-  ${DB.qualifications.length ? `<div class="table-wrap"><table>
-    <thead><tr><th>Qualification / Diplôme</th><th>Type</th><th>Agent</th><th>Validité</th><th>Statut</th><th>Actions</th></tr></thead>
-    <tbody>${rows}</tbody>
-  </table></div>` : '<div class="empty"><div class="empty-icon">🎓</div><div class="empty-text">Aucune qualification</div></div>'}`;
-}
-
 function openAddQualif(personnelId, qualifId) {
   const q = qualifId ? DB.qualifications.find(x=>x.id===qualifId) : null;
   document.getElementById('modal-title').textContent = q ? 'Modifier la qualification' : 'Ajouter une qualification';
@@ -1487,7 +1641,7 @@ function deleteQualif(id, personnelId) {
     syncDelete('qualifications', id);
     closeModal('modal-detail');
     if (personnelId) openDetailPersonnel(personnelId);
-    else showPage('diplomes');
+    else showPage('personnel');
   });
 }
 
@@ -1604,18 +1758,62 @@ function openUploadDoc(refId) {
 }
 
 // Menu rapide d'ajout de document sur une qualification
+// Menu d'import de document pour une certification de matériel
+function openDocMenuCertif(certifId, materielId) {
+  const c = DB.certifications.find(x=>x.id===certifId);
+  if (!c) return;
+  renderDocMenu({
+    titre: c.nom,
+    linkedDoc: c.docId ? DB.documents.find(d=>d.id===c.docId) : null,
+    onScan: (e) => handleScanForEntity(e, 'certif', materielId, certifId),
+    onFile: (e) => handleAttachNewDocCertif(e, certifId, materielId),
+  });
+}
+
+function handleAttachNewDocCertif(event, certifId, materielId) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const ext = file.name.split('.').pop().toLowerCase();
+  const type = ['jpg','jpeg','png','webp'].includes(ext)?'image':ext==='pdf'?'pdf':['xls','xlsx'].includes(ext)?'excel':'word';
+  const c = DB.certifications.find(x=>x.id===certifId);
+  const docId = uid();
+  const key = `${docId}-${file.name.replace(/[^a-zA-Z0-9._-]/g,'_')}`;
+  const mat = DB.materiel.find(x=>x.id===materielId);
+  const doc = { id:docId, nom:file.name, type, refId:materielId||null, refNom:mat?.nom||null, date:new Date().toLocaleDateString('fr-FR'), size:file.size, key };
+  DB.documents.push(doc);
+  if (c) { c.docId = docId; save('certifications'); syncUpsert('certifications', c); }
+  save('documents');
+  closeModal('modal-main');
+  uploadToR2(file, key).then(url => {
+    doc.url = url; save('documents'); syncUpsert('documents', doc);
+  }).catch(() => {
+    const fr = new FileReader();
+    fr.onload = e => { doc.dataUrl = e.target.result; save('documents'); syncUpsert('documents', doc); };
+    fr.readAsDataURL(file);
+  });
+  if (materielId) openDetailMateriel(materielId);
+}
+
 function openDocMenu(qualifId, personnelId) {
   const q = DB.qualifications.find(x=>x.id===qualifId);
   if (!q) return;
-  const linkedDoc = q.docId ? DB.documents.find(d=>d.id===q.docId) : null;
-  const hasDoc = !!linkedDoc;
+  renderDocMenu({
+    titre: q.nom,
+    linkedDoc: q.docId ? DB.documents.find(d=>d.id===q.docId) : null,
+    onScan: (e) => handleScanForEntity(e, 'qualif', personnelId, qualifId),
+    onFile: (e) => handleAttachNewDoc(e, qualifId, personnelId||''),
+  });
+}
 
+// Modal commune : choix entre photo/scan IA et import de fichier
+function renderDocMenu({ titre, linkedDoc, onScan, onFile }) {
+  const hasDoc = !!linkedDoc;
   const scanInputId = 'doc-menu-scan-' + Date.now();
   const fileInputId = 'doc-menu-file-' + Date.now();
 
   document.getElementById('modal-title').textContent = hasDoc ? '🔗 Remplacer le document' : '📎 Ajouter un document';
   document.getElementById('modal-body').innerHTML = `
-    <div style="font-size:13px;color:var(--text3);margin-bottom:16px;text-align:center">${q.nom}</div>
+    <div style="font-size:13px;color:var(--text3);margin-bottom:16px;text-align:center">${titre}</div>
     ${hasDoc ? `
     <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--surface2);border:1px solid var(--blue2);border-radius:10px;margin-bottom:16px">
       <span style="font-size:20px">${linkedDoc.type==='pdf'?'📕':linkedDoc.type==='image'?'🖼️':'📄'}</span>
@@ -1652,58 +1850,12 @@ function openDocMenu(qualifId, personnelId) {
   // Wiring des inputs après insertion dans le DOM
   setTimeout(()=>{
     const scanInput = document.getElementById(scanInputId);
-    if (scanInput) scanInput.onchange = (e) => {
-      closeModal('modal-main');
-      handleScanForEntity(e, 'qualif', personnelId, qualifId);
-    };
+    if (scanInput) scanInput.onchange = (e) => { closeModal('modal-main'); onScan(e); };
     const fileInput = document.getElementById(fileInputId);
-    if (fileInput) fileInput.onchange = (e) => handleAttachNewDoc(e, qualifId, personnelId||'');
+    if (fileInput) fileInput.onchange = (e) => onFile(e);
   }, 50);
 
   openModal('modal-main');
-}
-
-function attachDocToQualif(qualifId, personnelId) {
-  const q = DB.qualifications.find(x=>x.id===qualifId);
-  if (!q) return;
-  const existingDocs = DB.documents.filter(d => !d.refId || d.refId === q.personnelId);
-
-  document.getElementById('modal-title').textContent = 'Attacher un document à : ' + q.nom;
-  document.getElementById('modal-body').innerHTML = `
-    ${existingDocs.length ? `
-    <div class="field" style="margin-bottom:16px">
-      <label>Choisir un document existant</label>
-      <div style="display:flex;flex-direction:column;gap:8px;max-height:200px;overflow-y:auto">
-        ${existingDocs.map(d=>`
-          <div onclick="linkDocToQualif('${qualifId}','${d.id}','${personnelId||''}')"
-            style="display:flex;align-items:center;gap:10px;padding:10px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;cursor:pointer"
-            onmouseover="this.style.borderColor='var(--blue2)'" onmouseout="this.style.borderColor='var(--border)'">
-            <span style="font-size:20px">${d.type==='pdf'?'📕':d.type==='image'?'🖼️':'📄'}</span>
-            <div><div style="font-size:13px;font-weight:500">${d.nom}</div><div style="font-size:11px;color:var(--text3)">${d.date||''}</div></div>
-          </div>`).join('')}
-      </div>
-    </div>
-    <div style="text-align:center;color:var(--text3);font-size:12px;margin:8px 0">— ou —</div>` : ''}
-    <div class="scan-zone" onclick="document.getElementById('attach-doc-upload').click()">
-      <span class="scan-zone-icon">📂</span>
-      <p>Importer un nouveau document</p>
-      <p class="scan-hint">Photo, PDF, Word, Excel</p>
-    </div>
-    <input type="file" id="attach-doc-upload" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx" style="display:none"
-      onchange="handleAttachNewDoc(event,'${qualifId}','${personnelId||''}')">`;
-  document.getElementById('modal-footer').innerHTML = `<button class="btn btn-ghost" onclick="closeModal('modal-main')">Annuler</button>`;
-  openModal('modal-main');
-}
-
-function linkDocToQualif(qualifId, docId, personnelId) {
-  const q = DB.qualifications.find(x=>x.id===qualifId);
-  if (!q) return;
-  q.docId = docId;
-  save('qualifications');
-  syncUpsert('qualifications', q);
-  closeModal('modal-main');
-  if (personnelId) openDetailPersonnel(personnelId);
-  else showPage('diplomes');
 }
 
 function handleAttachNewDoc(event, qualifId, personnelId) {
@@ -1731,7 +1883,7 @@ function handleAttachNewDoc(event, qualifId, personnelId) {
     fr.readAsDataURL(file);
   });
   if (personnelId) openDetailPersonnel(personnelId);
-  else showPage('diplomes');
+  else showPage('personnel');
 }
 
 // Ouvrir un document depuis n'importe quelle interface (fiche, tableau, page Documents)
@@ -1758,7 +1910,7 @@ async function analyzeDocumentWithAI(docId) {
   const resultEl = document.getElementById('doc-ai-result');
   resultEl.innerHTML = `<div style="text-align:center;padding:16px;color:var(--text2)"><span class="spinner"></span> L'IA analyse le document...</div>`;
 
-  const existingMateriel = DB.materiel.map(m => `ID:${m.id} | ${m.nom} | ref:${m.ref||'?'} | cat:${m.categorie}`).join('\n');
+  const existingMateriel = DB.materiel.map(m => `ID:${m.id} | ${m.nom} | ref:${m.ref||'?'} | rubrique:${rubriqueOf(m)}`).join('\n');
   const existingPersonnel = DB.personnel.map(p => `ID:${p.id} | ${p.nom} | ${p.poste||''}`).join('\n');
 
   const systemPrompt = `Tu es un assistant expert en gestion de matériel de plongée professionnelle et BTP (BONNA TP).
@@ -1779,8 +1931,10 @@ Retourne un JSON avec deux tableaux (sans markdown) :
       "matchId": "ID existant si mise à jour sinon null",
       "nom": "nom de l'équipement",
       "ref": "référence/numéro de série",
-      "categorie": "Bouteille|Plongée|EPI|Véhicule|Engin|Bateau|Autre",
+      "rubrique": "plongee|navire|vehicule|grue",
       "souscat": "sous-type",
+      "certification": "intitulé du contrôle/certificat (ex: Contrôle périodique, Assurance, Permis de navigation)",
+      "typeCertif": "Requalification|Vérification périodique|Contrôle technique|Assurance|Permis / Titre|Autre",
       "dateValidite": "YYYY-MM-DD ou illimite",
       "organisme": "organisme certificateur",
       "notes": ""
@@ -1905,9 +2059,9 @@ function renderMultiDocImportPreview(parsed, docId) {
     return `<div style="border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:6px;background:var(--surface2)">
       <div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="font-size:13px;font-weight:600">${item.nom||'—'}</span>${badge}</div>
       <div style="font-size:11px;color:var(--text3);display:grid;grid-template-columns:1fr 1fr;gap:3px">
-        <div>Réf : ${item.ref||'—'}</div><div>Cat : ${item.categorie||'—'}</div>
+        <div>Réf : ${item.ref||'—'}</div><div>Rubrique : ${(RUBRIQUES[mapToRubrique(item.rubrique||item.categorie,item.souscat)]||{}).label||'—'}</div>
         <div>Validité : ${item.dateValidite==='illimite'?'♾️':item.dateValidite||'—'}</div><div>Organisme : ${item.organisme||'—'}</div>
-        ${existing?`<div style="grid-column:1/-1;color:var(--amber2)">Remplace : ${existing.nom} (${fmtDate(existing.dateValidite)})</div>`:''}
+        ${existing?`<div style="grid-column:1/-1;color:var(--amber2)">Met à jour : ${existing.nom}</div>`:''}
       </div></div>`;
   }).join('');
 
@@ -1941,14 +2095,8 @@ function applyMultiDocImport(parsed, docId) {
   let matCreated=0, matUpdated=0, qualCreated=0, qualSkipped=0;
 
   materiel.forEach(item => {
-    const data = { nom:item.nom||'Sans nom', ref:item.ref||'', categorie:item.categorie||'Autre', souscat:item.souscat||'', dateValidite:item.dateValidite||'', organisme:item.organisme||'', notes:item.notes||'' };
-    if (item.action==='update' && item.matchId) {
-      const idx = DB.materiel.findIndex(m=>m.id===item.matchId);
-      if (idx>=0) { DB.materiel[idx]={...DB.materiel[idx],...data}; syncUpsert('materiel',DB.materiel[idx]); matUpdated++; }
-    } else {
-      const newItem={id:uid(),...data};
-      DB.materiel.push(newItem); syncUpsert('materiel',newItem); matCreated++;
-    }
+    const res = applyMaterielItem(item, docId);
+    if (res.created) matCreated++; else matUpdated++;
   });
 
   qualifs.forEach(item => {
@@ -1959,7 +2107,8 @@ function applyMultiDocImport(parsed, docId) {
     DB.qualifications.push(newQ); syncUpsert('qualifications',newQ); qualCreated++;
   });
 
-  save('materiel'); save('qualifications');
+  save('materiel'); save('certifications'); save('qualifications');
+  generateNotifications(); updateBadges();
   closeModal('modal-detail');
   const msg = [`✅ Import terminé :`];
   if (matCreated) msg.push(`${matCreated} matériel créé`);
@@ -1967,7 +2116,7 @@ function applyMultiDocImport(parsed, docId) {
   if (qualCreated) msg.push(`${qualCreated} qualification ajoutée`);
   if (qualSkipped) msg.push(`${qualSkipped} qualification ignorée (agent non trouvé)`);
   alert(msg.join('\n'));
-  showPage('materiel');
+  showPage(currentPage);
 }
 
 async function analyzeExcelWithAI(docId) {
@@ -1984,7 +2133,7 @@ async function analyzeExcelWithAI(docId) {
   resultEl.innerHTML = `<div style="text-align:center;padding:16px;color:var(--text2)"><span class="spinner"></span> L'IA analyse le fichier Excel...</div>`;
 
   // Préparer le contexte : équipements existants
-  const existingMateriel = DB.materiel.map(m => `ID:${m.id} | ${m.nom} | ref:${m.ref||'?'} | cat:${m.categorie}`).join('\n');
+  const existingMateriel = DB.materiel.map(m => `ID:${m.id} | ${m.nom} | ref:${m.ref||'?'} | rubrique:${rubriqueOf(m)}`).join('\n');
   const tableStr = d.excelData.map(row => row.join(' | ')).join('\n');
 
   const prompt = `Tu es un assistant spécialisé en gestion de matériel de plongée et BTP.
@@ -2001,8 +2150,10 @@ Analyse ce tableau et extrait chaque équipement/item. Pour chaque ligne, retour
     "action": "update" ou "create",
     "nom": "nom de l'équipement",
     "ref": "référence ou numéro de série",
-    "categorie": "Bouteille|Plongée|EPI|Véhicule|Engin|Bateau|Autre",
+    "rubrique": "plongee|navire|vehicule|grue",
     "souscat": "sous-type si précisé",
+    "certification": "intitulé du contrôle/certificat (ex: Contrôle périodique, Assurance)",
+    "typeCertif": "Requalification|Vérification périodique|Contrôle technique|Assurance|Permis / Titre|Autre",
     "dateValidite": "YYYY-MM-DD ou illimite",
     "organisme": "organisme certificateur",
     "notes": "remarques importantes",
@@ -2070,10 +2221,10 @@ function renderExcelImportPreview(items, docId) {
       </div>
       <div style="font-size:11px;color:var(--text3);display:grid;grid-template-columns:1fr 1fr;gap:4px">
         <div>Réf : ${item.ref||'—'}</div>
-        <div>Catégorie : ${item.categorie||'—'}</div>
+        <div>Rubrique : ${(RUBRIQUES[mapToRubrique(item.rubrique||item.categorie,item.souscat)]||{}).label||'—'}</div>
         <div>Validité : ${item.dateValidite==='illimite'?'♾️ Illimité':item.dateValidite||'—'}</div>
         <div>Organisme : ${item.organisme||'—'}</div>
-        ${existing ? `<div style="grid-column:1/-1;color:var(--amber2)">Remplace : ${existing.nom} (${fmtDate(existing.dateValidite)})</div>` : ''}
+        ${existing ? `<div style="grid-column:1/-1;color:var(--amber2)">Met à jour : ${existing.nom}</div>` : ''}
       </div>
     </div>`;
   }).join('');
@@ -2092,36 +2243,17 @@ function renderExcelImportPreview(items, docId) {
 function applyExcelImport(items, docId) {
   let created = 0, updated = 0;
   items.forEach(item => {
-    const data = {
-      nom: item.nom || 'Sans nom',
-      ref: item.ref || '',
-      categorie: item.categorie || 'Autre',
-      souscat: item.souscat || '',
-      dateValidite: item.dateValidite || '',
-      organisme: item.organisme || '',
-      notes: item.notes || '',
-    };
-    if (item.action === 'update' && item.matchId) {
-      const idx = DB.materiel.findIndex(m=>m.id===item.matchId);
-      if (idx >= 0) {
-        DB.materiel[idx] = { ...DB.materiel[idx], ...data };
-        syncUpsert('materiel', DB.materiel[idx]);
-        updated++;
-      }
-    } else {
-      const newItem = { id: uid(), ...data };
-      DB.materiel.push(newItem);
-      syncUpsert('materiel', newItem);
-      created++;
-    }
+    const res = applyMaterielItem(item, docId);
+    if (res.created) created++; else updated++;
   });
-  save('materiel');
+  save('materiel'); save('certifications');
+  generateNotifications(); updateBadges();
   // Lier le document à son import
   const doc = DB.documents.find(x=>x.id===docId);
   if (doc) { doc.importedAt = new Date().toISOString(); save('documents'); }
   closeModal('modal-detail');
   alert(`✅ Import terminé : ${created} créé(s), ${updated} mis à jour`);
-  showPage('materiel');
+  showPage(currentPage);
 }
 
 function deleteDoc(id, context) {
@@ -2244,6 +2376,7 @@ function openScanDocForEntity(entityType, entityId, qualifId) {
   if (entityType === 'personnel') { const p = DB.personnel.find(x=>x.id===entityId); titre = `📷 Scanner un document — ${p?.nom||''}`; }
   if (entityType === 'materiel')  { const m = DB.materiel.find(x=>x.id===entityId); titre = `📷 Scanner un document — ${m?.nom||''}`; }
   if (entityType === 'qualif') { const q = DB.qualifications.find(x=>x.id===qualifId); titre = `📷 Mettre à jour — ${q?.nom||''}`; }
+  if (entityType === 'certif') { const c = DB.certifications.find(x=>x.id===qualifId); titre = `📷 Mettre à jour — ${c?.nom||''}`; }
 
   document.getElementById('modal-title').textContent = titre;
   document.getElementById('modal-body').innerHTML = `
@@ -2302,10 +2435,11 @@ async function handleScanForEntity(event, entityType, entityId, qualifId) {
 
   // Contexte selon l'entité
   const personnelCible = entityType==='personnel' ? DB.personnel.find(x=>x.id===entityId) : null;
-  const materielCible = entityType==='materiel' ? DB.materiel.find(x=>x.id===entityId) : null;
-  const qualifCible = qualifId ? DB.qualifications.find(x=>x.id===qualifId) : null;
+  const materielCible = (entityType==='materiel'||entityType==='certif') ? DB.materiel.find(x=>x.id===entityId) : null;
+  const qualifCible = (entityType==='qualif' && qualifId) ? DB.qualifications.find(x=>x.id===qualifId) : null;
+  const certifCible = (entityType==='certif' && qualifId) ? DB.certifications.find(x=>x.id===qualifId) : null;
 
-  const existingMateriel = DB.materiel.map(m=>`ID:${m.id} | ${m.nom} | ref:${m.ref||'?'} | cat:${m.categorie}`).join('\n');
+  const existingMateriel = DB.materiel.map(m=>`ID:${m.id} | ${m.nom} | ref:${m.ref||'?'} | rubrique:${rubriqueOf(m)}`).join('\n');
   const existingPersonnel = DB.personnel.map(p=>`ID:${p.id} | ${p.nom}`).join('\n');
   // Qualifications existantes de la personne cible (pour détecter les doublons)
   const qualifsDeLaPersonne = personnelCible
@@ -2316,6 +2450,7 @@ async function handleScanForEntity(event, entityType, entityId, qualifId) {
   if (personnelCible) contexte = `\n\nCE DOCUMENT APPARTIENT À : ${personnelCible.nom} (ID:${entityId})\nSes qualifications existantes :\n${qualifsDeLaPersonne||'Aucune'}\nPOUR TOUTE QUALIFICATION TROUVÉE : assigne-la à cette personne (matchPersonnelId="${entityId}"). Si une qualification du même type ET même nom existe déjà pour cette personne, indique action:"update" et matchQualifId avec son ID.`;
   if (materielCible) contexte = `\n\nCE DOCUMENT CONCERNE LE MATÉRIEL : ${materielCible.nom} | ref:${materielCible.ref||'?'} (ID:${entityId})\nPOUR TOUT MATÉRIEL TROUVÉ : si c'est le même équipement, indique action:"update" et matchId="${entityId}".`;
   if (qualifCible) contexte = `\n\nCE DOCUMENT MET À JOUR LA QUALIFICATION : ${qualifCible.nom} | type:${qualifCible.type} | agent ID:${qualifCible.personnelId}\nIndique action:"update", matchPersonnelId="${qualifCible.personnelId}", matchQualifId="${qualifCible.id}".`;
+  if (certifCible) contexte = `\n\nCE DOCUMENT MET À JOUR LA CERTIFICATION : ${certifCible.nom} | type:${certifCible.type} | du matériel : ${materielCible?.nom||''} (ID:${entityId})\nIndique action:"update", matchId="${entityId}", certification="${certifCible.nom}" et la nouvelle dateValidite lue sur le document.`;
 
   const systemPrompt = `Tu es un assistant expert en gestion de matériel de plongée professionnelle et BTP (BONNA TP).
 Équipements existants :\n${existingMateriel||'Aucun'}
@@ -2324,7 +2459,7 @@ ${contexte}
 
 Analyse ce document et retourne UNIQUEMENT ce JSON (sans markdown) :
 {
-  "materiel": [{"action":"update"|"create","matchId":"ID si update sinon null","nom":"...","ref":"...","categorie":"Bouteille|Plongée|EPI|Véhicule|Engin|Bateau|Autre","souscat":"...","dateValidite":"YYYY-MM-DD ou illimite","organisme":"...","notes":""}],
+  "materiel": [{"action":"update"|"create","matchId":"ID si update sinon null","nom":"...","ref":"...","rubrique":"plongee|navire|vehicule|grue","souscat":"...","certification":"intitulé du contrôle","typeCertif":"Requalification|Vérification périodique|Contrôle technique|Assurance|Permis / Titre|Autre","dateValidite":"YYYY-MM-DD ou illimite","organisme":"...","notes":""}],
   "qualifications": [{"action":"update"|"create","matchPersonnelId":"ID ou null","matchQualifId":"ID qualif existante si doublon sinon null","personnelNom":"...","nom":"...","type":"Permis / Habilitation|Diplôme|Aptitude médicale|Formation","dateValidite":"YYYY-MM-DD ou illimite","organisme":"...","notes":""}]
 }`;
 
@@ -2378,9 +2513,9 @@ function renderScanEntityPreview(parsed, doc, entityType, entityId, qualifId, re
     return `<div style="border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:6px;background:var(--surface2)">
       <div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="font-size:13px;font-weight:600">${item.nom}</span>${badge}</div>
       <div style="font-size:11px;color:var(--text3);display:grid;grid-template-columns:1fr 1fr;gap:2px">
-        <div>Réf : ${item.ref||'—'}</div><div>Cat : ${item.categorie||'—'}</div>
+        <div>Réf : ${item.ref||'—'}</div><div>Rubrique : ${(RUBRIQUES[mapToRubrique(item.rubrique||item.categorie,item.souscat)]||{}).label||'—'}</div>
         <div>Validité : ${item.dateValidite==='illimite'?'♾️':item.dateValidite||'—'}</div><div>Organisme : ${item.organisme||'—'}</div>
-        ${existing?`<div style="grid-column:1/-1;color:var(--amber2);font-size:11px">Remplace : ${existing.nom} (${fmtDate(existing.dateValidite)})</div>`:''}
+        ${existing?`<div style="grid-column:1/-1;color:var(--amber2);font-size:11px">Met à jour : ${existing.nom}</div>`:''}
       </div></div>`;
   }).join('');
 
@@ -2425,24 +2560,35 @@ function applyScanEntityImport(parsed, docId, entityType, entityId, qualifId) {
   let created=0, updated=0, skipped=0;
 
   materiel.forEach(item => {
-    const data = {nom:item.nom||'Sans nom',ref:item.ref||'',categorie:item.categorie||'Autre',souscat:item.souscat||'',dateValidite:item.dateValidite||'',organisme:item.organisme||'',notes:item.notes||''};
-    if (item.action==='update' && item.matchId) {
-      const idx = DB.materiel.findIndex(m=>m.id===item.matchId);
-      if (idx>=0) {
-        DB.materiel[idx] = {...DB.materiel[idx],...data};
-        // Attacher le nouveau document au matériel (remplace l'ancien lien)
-        if (doc) { doc.refId=item.matchId; doc.refNom=DB.materiel[idx].nom; }
-        syncUpsert('materiel', DB.materiel[idx]);
-        updated++;
-      }
-    } else {
-      const newItem = {id:uid(),...data};
-      DB.materiel.push(newItem);
-      if (doc) { doc.refId=newItem.id; doc.refNom=newItem.nom; }
-      syncUpsert('materiel', newItem);
-      created++;
+    // Scan depuis la fiche d'un matériel : on force la mise à jour de CE matériel
+    if (entityType === 'materiel' && entityId && !item.matchId) {
+      item = {...item, action:'update', matchId:entityId};
+    }
+    const res = applyMaterielItem(item, docId);
+    if (res.created) created++; else updated++;
+    // Attacher le document scanné au matériel
+    if (doc) {
+      const mm = DB.materiel.find(m=>m.id===res.materielId);
+      doc.refId = res.materielId;
+      doc.refNom = mm?.nom || doc.refNom;
     }
   });
+
+  // Scan depuis une certification précise : on y rattache le document
+  if (entityType === 'certif' && qualifId) {
+    const c = DB.certifications.find(x=>x.id===qualifId);
+    if (c) {
+      const first = materiel.find(x=>x.dateValidite);
+      if (first) {
+        c.dateValidite = first.dateValidite;
+        if (first.organisme) c.organisme = first.organisme;
+      }
+      c.docId = docId;
+      save('certifications'); syncUpsert('certifications', c);
+      if (doc) { doc.refId = entityId; doc.refNom = DB.materiel.find(m=>m.id===entityId)?.nom || doc.refNom; }
+      updated++;
+    }
+  }
 
   qualifs.forEach(item => {
     const personnelId = item.matchPersonnelId || null;
@@ -2492,7 +2638,7 @@ function applyScanEntityImport(parsed, docId, entityType, entityId, qualifId) {
     }
     save('documents'); syncUpsert('documents', doc);
   }
-  save('materiel'); save('qualifications');
+  save('materiel'); save('certifications'); save('qualifications');
   generateNotifications();
   updateBadges();
 
@@ -2508,7 +2654,7 @@ function applyScanEntityImport(parsed, docId, entityType, entityId, qualifId) {
   // Rafraîchir la fiche courante
   // Pour 'qualif', entityId est l'id du personnel → on revient sur la fiche personnel
   if ((entityType==='personnel'||entityType==='qualif') && entityId) openDetailPersonnel(entityId);
-  else if (entityType==='materiel' && entityId) openDetailMateriel(entityId);
+  else if ((entityType==='materiel'||entityType==='certif') && entityId) openDetailMateriel(entityId);
   else showPage('documents');
 }
 
@@ -2680,22 +2826,21 @@ function askApiKey() {
 // STATS
 // ============================================================
 function renderStats() {
-  const allItems = [...DB.materiel,...DB.qualifications];
+  const allItems = [...DB.certifications,...DB.qualifications];
   const expired = allItems.filter(x=>getStatus(x.dateValidite).status==='expired');
   const soon = allItems.filter(x=>getStatus(x.dateValidite).status==='soon');
   const ok = allItems.filter(x=>getStatus(x.dateValidite).status==='ok');
   const conf = allItems.length ? Math.round(((ok.length+soon.length)/allItems.length)*100) : 100;
 
-  const cats = ['Bouteille','Plongée','EPI','Véhicule','Engin','Bateau'];
-  const catBars = cats.map(cat => {
-    const items = DB.materiel.filter(m=>m.categorie===cat);
+  const catBars = Object.entries(RUBRIQUES).map(([key, R]) => {
+    const items = DB.materiel.filter(m=>rubriqueOf(m)===key);
     if (!items.length) return '';
-    const expd = items.filter(m=>getStatus(m.dateValidite).status==='expired').length;
-    const sn = items.filter(m=>getStatus(m.dateValidite).status==='soon').length;
-    const ok2 = items.filter(m=>getStatus(m.dateValidite).status==='ok').length;
-    return `<div style="margin-bottom:16px">
+    const expd = items.filter(m=>materielStatus(m.id).status==='expired').length;
+    const sn = items.filter(m=>materielStatus(m.id).status==='soon').length;
+    const ok2 = items.filter(m=>materielStatus(m.id).status==='ok').length;
+    return `<div style="margin-bottom:16px;cursor:pointer" onclick="showPage('${key}')">
       <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:6px">
-        <span>${catIcon(cat)} ${cat} <span style="color:var(--text3)">(${items.length})</span></span>
+        <span>${R.icon} ${R.label} <span style="color:var(--text3)">(${items.length})</span></span>
         <span style="display:flex;gap:6px">
           ${expd?`<span class="badge badge-red">${expd} exp.</span>`:''}
           ${sn?`<span class="badge badge-amber">${sn} bientôt</span>`:''}
@@ -2730,7 +2875,7 @@ function renderStats() {
   </div>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start">
     <div>
-      <div class="section-title">Matériel par catégorie</div>
+      <div class="section-title">Matériel par rubrique</div>
       <div class="card">${catBars||'<div style="color:var(--text3)">Aucune donnée</div>'}</div>
     </div>
     <div>
@@ -2757,10 +2902,20 @@ function renderStats() {
 function exportExcel(type) {
   const wb = XLSX.utils.book_new();
   if (type==='materiel'||type==='all') {
-    const rows = DB.materiel.map(m => ({
-      Nom:m.nom, Référence:m.ref, Catégorie:m.categorie, 'Sous-type':m.souscat,
-      'Date validité':fmtDate(m.dateValidite), Statut:getStatus(m.dateValidite).label, Organisme:m.organisme, Notes:m.notes
-    }));
+    // Une ligne par certification, avec son matériel. Le matériel sans certification apparaît quand même.
+    const rows = [];
+    DB.materiel.forEach(m => {
+      const R = RUBRIQUES[rubriqueOf(m)] || RUBRIQUES.plongee;
+      const cs = certifsOf(m.id);
+      if (!cs.length) {
+        rows.push({ Rubrique:R.label, Matériel:m.nom, Référence:m.ref||'', 'Sous-type':m.souscat||'',
+          Certification:'—', Type:'—', 'Date validité':'—', Statut:'Aucune certification', Organisme:'', Notes:m.notes||'' });
+      } else {
+        cs.forEach(c => rows.push({ Rubrique:R.label, Matériel:m.nom, Référence:m.ref||'', 'Sous-type':m.souscat||'',
+          Certification:c.nom, Type:c.type||'', 'Date validité':fmtDate(c.dateValidite),
+          Statut:getStatus(c.dateValidite).label, Organisme:c.organisme||'', Notes:c.notes||'' }));
+      }
+    });
     XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Matériel');
   }
   if (type==='qualifications'||type==='all') {
@@ -2787,14 +2942,22 @@ function exportExcel(type) {
 function globalSearch(q) {
   if (!q.trim()) return;
   const lq = q.toLowerCase();
-  const matResults = DB.materiel.filter(m=>m.nom.toLowerCase().includes(lq)||m.ref?.toLowerCase().includes(lq));
-  const qualifResults = DB.qualifications.filter(x=>x.nom.toLowerCase().includes(lq));
-  const persResults = DB.personnel.filter(p=>p.nom.toLowerCase().includes(lq));
-  if (matResults.length+qualifResults.length+persResults.length===0) return;
-  // Navigate to most relevant
-  if (matResults.length) showPage('materiel');
-  else if (persResults.length) showPage('personnel');
-  else showPage('diplomes');
+  const matResults = DB.materiel.filter(m=>(m.nom||'').toLowerCase().includes(lq)||m.ref?.toLowerCase().includes(lq));
+  const persResults = DB.personnel.filter(p=>(p.nom||'').toLowerCase().includes(lq));
+  if (matResults.length + persResults.length === 0) { showToast('Aucun résultat pour « '+q+' »', 'warning'); return; }
+  // Un seul résultat : on ouvre directement sa fiche
+  if (matResults.length === 1 && !persResults.length) {
+    showPage(rubriqueOf(matResults[0]));
+    openDetailMateriel(matResults[0].id);
+    return;
+  }
+  if (persResults.length === 1 && !matResults.length) {
+    showPage('personnel');
+    openDetailPersonnel(persResults[0].id);
+    return;
+  }
+  if (matResults.length) showPage(rubriqueOf(matResults[0]));
+  else showPage('personnel');
 }
 
 // ============================================================
