@@ -422,65 +422,47 @@ if (SUPABASE_URL !== 'VOTRE_URL_ICI' && SUPABASE_ANON_KEY !== 'VOTRE_ANON_KEY_IC
 }
 
 // ============================================================
-// CLOUDFLARE R2 CONFIG
+// STOCKAGE DES FICHIERS
 // ============================================================
-const R2_ACCOUNT_ID = '95c20f509cfad82d40d1d43ecafe08e6';
-const R2_ACCESS_KEY_ID = 'ad4e9149ea6f4c7a9ef53a47a33866b3';
-const R2_SECRET_ACCESS_KEY = '8fb35eb985cbe1eeee6c56093398479d77849d28bd3149772b978d65b7c4ff0e';
-const R2_BUCKET = 'qualifmanager-docs';
-const R2_PUBLIC_URL = 'https://pub-5985ab0e232c476594da85f5b258032d.r2.dev';
-// Clé API IA — assemblée au runtime
-function getApiKey() { return localStorage.getItem('qm_apikey') || ''; }
+// Aucun identifiant ici. Le serveur (/api/upload) délivre une autorisation
+// signée de courte durée, puis le fichier part directement vers R2 : aucun
+// secret dans le navigateur, et pas de limite de taille de requête.
+async function uploadToR2(file, nomSuggere) {
+  const type = file.type || 'application/octet-stream';
 
-// Upload un fichier vers R2 via l'API S3-compatible
-async function uploadToR2(file, key) {
-  const endpoint = `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com/${R2_BUCKET}/${key}`;
-  // Signature AWS4-HMAC-SHA256 (S3 compatible)
-  const now = new Date();
-  const dateStr = now.toISOString().replace(/[-:]/g,'').split('.')[0]+'Z';
-  const dateShort = dateStr.slice(0,8);
-  const region = 'auto';
-  const service = 's3';
-
-  // Hash du body
-  const bodyBuffer = await file.arrayBuffer();
-  const hashBuffer = await crypto.subtle.digest('SHA-256', bodyBuffer);
-  const bodyHash = Array.from(new Uint8Array(hashBuffer)).map(b=>b.toString(16).padStart(2,'0')).join('');
-
-  const canonicalHeaders = `content-type:${file.type||'application/octet-stream'}\nhost:${R2_ACCOUNT_ID}.r2.cloudflarestorage.com\nx-amz-content-sha256:${bodyHash}\nx-amz-date:${dateStr}\n`;
-  const signedHeaders = 'content-type;host;x-amz-content-sha256;x-amz-date';
-  const canonicalRequest = `PUT\n/${R2_BUCKET}/${key}\n\n${canonicalHeaders}\n${signedHeaders}\n${bodyHash}`;
-
-  const credentialScope = `${dateShort}/${region}/${service}/aws4_request`;
-  const crHash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(canonicalRequest)))).map(b=>b.toString(16).padStart(2,'0')).join('');
-  const stringToSign = `AWS4-HMAC-SHA256\n${dateStr}\n${credentialScope}\n${crHash}`;
-
-  // Dériver la clé de signature
-  async function hmac(key, data) {
-    const k = typeof key === 'string' ? new TextEncoder().encode(key) : key;
-    const cryptoKey = await crypto.subtle.importKey('raw', k, {name:'HMAC',hash:'SHA-256'}, false, ['sign']);
-    return new Uint8Array(await crypto.subtle.sign('HMAC', cryptoKey, new TextEncoder().encode(data)));
-  }
-  const kDate = await hmac('AWS4' + R2_SECRET_ACCESS_KEY, dateShort);
-  const kRegion = await hmac(kDate, region);
-  const kService = await hmac(kRegion, service);
-  const kSigning = await hmac(kService, 'aws4_request');
-  const signature = Array.from(await hmac(kSigning, stringToSign)).map(b=>b.toString(16).padStart(2,'0')).join('');
-
-  const authHeader = `AWS4-HMAC-SHA256 Credential=${R2_ACCESS_KEY_ID}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
-
-  const res = await fetch(endpoint, {
-    method: 'PUT',
+  const demande = await fetch('/api/upload', {
+    method: 'POST',
     headers: {
-      'Content-Type': file.type || 'application/octet-stream',
-      'x-amz-date': dateStr,
-      'x-amz-content-sha256': bodyHash,
-      'Authorization': authHeader
+      'x-nom-fichier': encodeURIComponent(nomSuggere || file.name || 'fichier'),
+      'x-type-fichier': type,
     },
-    body: bodyBuffer
   });
-  if (!res.ok) throw new Error(`R2 upload failed: ${res.status} ${await res.text()}`);
-  return `${R2_PUBLIC_URL}/${key}`;
+  const autorisation = await demande.json().catch(() => ({}));
+  if (!demande.ok || !autorisation.uploadUrl) {
+    throw new Error(autorisation.error || `Envoi refusé (${demande.status})`);
+  }
+
+  const envoi = await fetch(autorisation.uploadUrl, {
+    method: 'PUT',
+    headers: { 'Content-Type': type },
+    body: file,
+  });
+  if (!envoi.ok) throw new Error(`Le stockage a refusé le fichier (${envoi.status})`);
+
+  return autorisation.url;
+}
+
+// Appel de l'analyse IA via /api/claude, qui porte la clé côté serveur.
+async function appelIA(messages, maxTokens = 4000) {
+  const res = await fetch('/api/claude', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messages, max_tokens: maxTokens }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `Analyse refusée (${res.status})`);
+  if (data.error) throw new Error(data.error.message || data.error);
+  return data;
 }
 
 function setSyncStatus(state) {
@@ -546,19 +528,6 @@ function handleLogout() {
 async function onAuthReady(user) {
   currentUser = user || { id: 'shared', email: 'equipe@bonna-tp.fr' };
   setSyncStatus('syncing');
-  // Charger la clé API depuis Supabase (partagée entre tous les utilisateurs)
-  if (sb) {
-    try {
-      const { data: settingsRows } = await sb.from('app_settings').select('key,value').eq('org_id', 'bonna-tp');
-      if (settingsRows) {
-        settingsRows.forEach(row => {
-          if (row.key === 'anthropic_api_key' && row.value) {
-            localStorage.setItem('qm_apikey', row.value);
-          }
-        });
-      }
-    } catch(e) { /* silencieux */ }
-  }
   await pullAllFromSupabase();
   subscribeRealtime();
   setSyncStatus('online');
@@ -1058,11 +1027,11 @@ function renderAlertes() {
   </div>
 
   <div style="margin-top:20px" class="card">
-    <div class="section-title" style="margin-bottom:4px">🤖 Configuration IA</div>
+    <div class="section-title" style="margin-bottom:4px">🤖 Analyse IA</div>
     <div style="background:rgba(52,199,89,0.1);border:1px solid rgba(52,199,89,0.3);border-radius:8px;padding:10px 14px;font-size:13px;color:var(--green2)">
       ✅ Analyse IA active — disponible pour toute l'équipe
     </div>
-    <div style="margin-top:10px;font-size:12px;color:var(--text3)">Analysez vos documents PDF, photos et fichiers Excel depuis la section Documents.</div>
+    <div style="margin-top:10px;font-size:12px;color:var(--text3)">Analysez vos documents PDF, photos et fichiers Excel depuis la section Documents. La clé d'accès est détenue par le serveur : elle n'est plus stockée dans l'application ni dans la base.</div>
   </div>`;
 }
 
@@ -1077,30 +1046,6 @@ function markAllRead() {
 function saveAlertDays() {
   const v = parseInt(document.getElementById('alert-days-input').value);
   if (v>0) { DB.settings.alertDays = v; save('settings'); showPage('alertes'); }
-}
-
-async function saveApiKey() {
-  const key = document.getElementById('apikey-input').value.trim();
-  if (!key) { alert('Entrez une clé API valide (sk-ant-...)'); return; }
-  if (!key.startsWith('sk-ant-')) { alert('La clé doit commencer par sk-ant-...'); return; }
-  // Stocker en localStorage pour usage immédiat
-  localStorage.setItem('qm_apikey', key);
-  // Stocker dans Supabase pour partage entre tous les utilisateurs
-  if (sb) {
-    await sb.from('app_settings').upsert({ key: 'anthropic_api_key', value: key, org_id: 'bonna-tp' });
-  }
-  const statusEl = document.getElementById('apikey-status');
-  if (statusEl) { statusEl.style.display = 'block'; statusEl.textContent = '✅ Clé API enregistrée — l\'analyse IA est active pour tous les utilisateurs'; }
-  showPage('alertes');
-}
-
-async function deleteApiKey() {
-  if (!confirm('Supprimer la clé API ? L\'analyse IA ne sera plus disponible.')) return;
-  localStorage.removeItem('qm_apikey');
-  if (sb) {
-    await sb.from('app_settings').delete().eq('key', 'anthropic_api_key').eq('org_id', 'bonna-tp');
-  }
-  showPage('alertes');
 }
 
 // ============================================================
@@ -2170,11 +2115,6 @@ function openDocFromQualif(docId) {
 }
 
 async function analyzeDocumentWithAI(docId) {
-  const apiKey = getApiKey();
-  if (!apiKey) {
-    alert('Clé API non configurée. Allez dans Alertes → Configuration IA.');
-    return;
-  }
   const d = DB.documents.find(x=>x.id===docId);
   if (!d) return;
 
@@ -2262,23 +2202,7 @@ Réponds UNIQUEMENT avec le JSON, sans commentaire ni markdown.`;
       return;
     }
 
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true'
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 8000,
-        messages: [{ role: 'user', content: userContent }]
-      })
-    });
-
-    const data = await res.json();
-    if (data.error) throw new Error(data.error.message);
+    const data = await appelIA([{ role: 'user', content: userContent }], 8000);
     const text = data.content?.[0]?.text || '';
 
     // Extraire le JSON même si la réponse contient du texte autour
@@ -2391,11 +2315,6 @@ function applyMultiDocImport(parsed, docId) {
 }
 
 async function analyzeExcelWithAI(docId) {
-  const apiKey = getApiKey();
-  if (!apiKey) {
-    alert('Clé API non configurée. Allez dans Alertes → Configuration IA pour la saisir.');
-    return;
-  }
   const d = DB.documents.find(x=>x.id===docId);
   if (!d || !d.excelData) { alert('Données Excel non disponibles'); return; }
 
@@ -2441,22 +2360,7 @@ Règles :
 - Réponds UNIQUEMENT avec le JSON array, sans commentaire ni markdown`;
 
   try {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true'
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 8000,
-        messages: [{ role: 'user', content: prompt }]
-      })
-    });
-    const data = await res.json();
-    if (data.error) throw new Error(data.error.message);
+    const data = await appelIA([{ role: 'user', content: prompt }], 8000);
     const text = data.content?.[0]?.text || '';
     let jsonStr = text.replace(/```json|```/g,'').trim();
     const firstBracket = jsonStr.indexOf('[');
@@ -2671,11 +2575,6 @@ async function handleScanForEntity(event, entityType, entityId, qualifId) {
   const resultEl = document.getElementById('scan-entity-result');
   resultEl.innerHTML = `<div style="text-align:center;padding:16px;color:var(--text2)"><span class="spinner"></span> Upload en cours...</div>`;
 
-  const apiKey = getApiKey();
-  if (!apiKey) {
-    resultEl.innerHTML = `<div style="color:var(--amber2);padding:10px;font-size:13px">⚠️ Clé API non configurée. Allez dans Alertes → Configuration IA.</div>`;
-    return;
-  }
 
   // 1. Upload vers R2 immédiatement
   const ext = file.name.split('.').pop().toLowerCase();
@@ -2747,13 +2646,7 @@ Analyse ce document et retourne UNIQUEMENT ce JSON (sans markdown) :
       ? { type:'document', source:{type:'base64',media_type:'application/pdf',data:base64} }
       : { type:'image', source:{type:'base64',media_type:mediaType,data:base64} };
 
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method:'POST',
-      headers:{'Content-Type':'application/json','x-api-key':apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
-      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:4000,messages:[{role:'user',content:[contentBlock,{type:'text',text:systemPrompt}]}]})
-    });
-    const data = await res.json();
-    if (data.error) throw new Error(data.error.message);
+    const data = await appelIA([{role:'user',content:[contentBlock,{type:'text',text:systemPrompt}]}], 4000);
     let text = data.content?.[0]?.text||'';
     text = text.replace(/```json|```/g,'').trim();
     const fb=text.indexOf('{'), lb=text.lastIndexOf('}');
@@ -3005,16 +2898,6 @@ function handleFileScan(event, target) {
 }
 
 async function analyzeWithClaude(base64, mediaType, target) {
-  const apiKey = getApiKey();
-  if (!apiKey) {
-    const resultEl = document.getElementById('scan-result-' + target);
-    if (resultEl) {
-      resultEl.style.display='block';
-      resultEl.innerHTML='<span style="color:var(--amber2)">⚠️ Clé API non configurée. <button class="btn btn-primary btn-sm" onclick="showPage(\'alertes\')">⚙️ Configurer maintenant</button></span>';
-    }
-    return;
-  }
-
   const resultEl = document.getElementById('scan-result-' + target);
   if (resultEl) { resultEl.style.display='block'; resultEl.innerHTML='<span class="ai-badge"><span class="spinner"></span> Analyse IA en cours...</span>'; }
 
@@ -3025,24 +2908,10 @@ async function analyzeWithClaude(base64, mediaType, target) {
     : { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } };
 
   try {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true'
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-6', max_tokens: 512,
-        messages: [{ role: 'user', content: [
+    const data = await appelIA([{ role: 'user', content: [
           contentBlock,
           { type: 'text', text: 'Extrait de ce document les informations suivantes en JSON strict (sans markdown):\n{"nom":"désignation ou titre","date_validite":"YYYY-MM-DD ou illimite si pas de date expiration","organisme":"","type":"","serie":""}\nSi la date est illimitée/permanente/sans expiration, mets "illimite". Si une info est absente, mets null. Réponds UNIQUEMENT avec le JSON.' }
-        ]}]
-      })
-    });
-    const data = await res.json();
-    if (data.error) throw new Error(data.error.message);
+        ]}], 512);
     const text = data.content?.[0]?.text || '';
     const parsed = JSON.parse(text.replace(/```json|```/g,'').trim());
     if (parsed.nom && document.getElementById(target==='mat'?'mat-nom':'q-nom')) document.getElementById(target==='mat'?'mat-nom':'q-nom').value = parsed.nom;
@@ -3086,11 +2955,6 @@ function extractFromTableData(data, target) {
   if (nom && document.getElementById(target==='mat'?'mat-nom':'q-nom')) document.getElementById(target==='mat'?'mat-nom':'q-nom').value = nom;
   if (date) document.getElementById(target==='mat'?'mat-date':'q-date').value = date;
   if (org && document.getElementById(target==='mat'?'mat-org':'q-org')) document.getElementById(target==='mat'?'mat-org':'q-org').value = org;
-}
-
-function askApiKey() {
-  const key = prompt('Entrez votre clé API Anthropic (commence par sk-ant-...):\n\nObtenez-la sur https://console.anthropic.com');
-  if (key) { localStorage.setItem('qm_apikey', key); alert('Clé enregistrée ✅'); }
 }
 
 // ============================================================
