@@ -460,7 +460,12 @@ async function appelIA(messages, maxTokens = 4000) {
     body: JSON.stringify({ messages, max_tokens: maxTokens }),
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `Analyse refusée (${res.status})`);
+  if (!res.ok) {
+    if (res.status === 504 || res.status === 408) {
+      throw new Error("L'analyse a dépassé le temps imparti. Réessayez avec un document plus court ou une photo moins lourde.");
+    }
+    throw new Error(data.error || `Analyse refusée (${res.status})`);
+  }
   if (data.error) throw new Error(data.error.message || data.error);
   return data;
 }

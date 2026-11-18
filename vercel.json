@@ -1,4 +1,8 @@
 {
+  "functions": {
+    "api/claude.js": { "maxDuration": 60 },
+    "api/upload.js": { "maxDuration": 15 }
+  },
   "headers": [
     {
       "source": "/",
