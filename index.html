@@ -1399,7 +1399,7 @@ function openAddCertif(materielId, certifId) {
     <div class="field"><label>Type *</label><select id="c-type">
       ${CERTIF_TYPES.map(t=>`<option value="${t}" ${c?.type===t?'selected':''}>${t}</option>`).join('')}
     </select></div>
-    <div class="field"><label>Nom / Intitulé *</label><input id="c-nom" value="${c?.nom||''}" placeholder="Ex : Contrôle périodique"></div>
+    <div class="field"><label>Désignation *</label><input id="c-nom" value="${c?.nom||''}" placeholder="Ex : Contrôle périodique"></div>
     <div class="field"><label>Date de fin de validité *</label>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <button type="button" id="c-toggle-illimite" onclick="toggleIllimite('c')"
@@ -1811,7 +1811,7 @@ function openAddQualif(personnelId, qualifId) {
     <div class="field"><label>Type *</label><select id="q-type">
       ${['Aptitude médicale','Diplôme','Permis / Habilitation','Formation','Autre'].map(t=>`<option value="${t}" ${q?.type===t?'selected':''}>${catIcon(t)} ${t}</option>`).join('')}
     </select></div>
-    <div class="field"><label>Nom / Intitulé *</label><input id="q-nom" value="${q?.nom||''}" placeholder="Ex : Certificat médical plongée"></div>
+    <div class="field"><label>Désignation *</label><input id="q-nom" value="${q?.nom||''}" placeholder="Ex : CACES R489 catégorie 3"></div>
     <div class="field"><label>Date de fin de validité *</label>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <button type="button" id="q-toggle-illimite" onclick="toggleIllimite('q')"
@@ -2160,8 +2160,8 @@ Retourne un JSON avec deux tableaux (sans markdown) :
     {
       "action": "update" ou "create",
       "matchPersonnelId": "ID du personnel concerné sinon null",
-      "personnelNom": "nom de la personne",
-      "nom": "nom du diplôme/qualification",
+      "personnelNom": "nom de la personne titulaire",
+      "nom": "DÉSIGNATION de la qualification telle qu'imprimée sur le document (ex: CACES R489 catégorie 3, Certificat d'aptitude à l'hyperbarie classe II mention B) — jamais le nom de la personne ni de l'organisme",
       "type": "Permis / Habilitation|Diplôme|Aptitude médicale|Formation",
       "dateValidite": "YYYY-MM-DD ou illimite",
       "organisme": "organisme émetteur",
@@ -2635,7 +2635,7 @@ ${contexte}
 Analyse ce document et retourne UNIQUEMENT ce JSON (sans markdown) :
 {
   "materiel": [{"action":"update"|"create","matchId":"ID si update sinon null","nom":"...","ref":"...","rubrique":"plongee|navire|vehicule|grue","souscat":"...","certification":"intitulé du contrôle","typeCertif":"Requalification|Vérification périodique|Contrôle technique|Assurance|Permis / Titre|Autre","dateValidite":"YYYY-MM-DD ou illimite","organisme":"...","notes":""}],
-  "qualifications": [{"action":"update"|"create","matchPersonnelId":"ID ou null","matchQualifId":"ID qualif existante si doublon sinon null","personnelNom":"...","nom":"...","type":"Permis / Habilitation|Diplôme|Aptitude médicale|Formation","dateValidite":"YYYY-MM-DD ou illimite","organisme":"...","notes":""}]
+  "qualifications": [{"action":"update"|"create","matchPersonnelId":"ID ou null","matchQualifId":"ID qualif existante si doublon sinon null","personnelNom":"nom de la personne titulaire","nom":"DÉSIGNATION de la qualification telle qu'imprimée sur le document, jamais le nom de la personne","type":"Permis / Habilitation|Diplôme|Aptitude médicale|Formation","dateValidite":"YYYY-MM-DD ou illimite","organisme":"...","notes":""}]
 }`;
 
   try {
@@ -2915,7 +2915,17 @@ async function analyzeWithClaude(base64, mediaType, target) {
   try {
     const data = await appelIA([{ role: 'user', content: [
           contentBlock,
-          { type: 'text', text: 'Extrait de ce document les informations suivantes en JSON strict (sans markdown):\n{"nom":"désignation ou titre","date_validite":"YYYY-MM-DD ou illimite si pas de date expiration","organisme":"","type":"","serie":""}\nSi la date est illimitée/permanente/sans expiration, mets "illimite". Si une info est absente, mets null. Réponds UNIQUEMENT avec le JSON.' }
+          { type: 'text', text: `Extrait de ce document les informations suivantes en JSON strict (sans markdown) :
+{"nom":"","titulaire":"","date_validite":"YYYY-MM-DD ou illimite","organisme":"","type":"","serie":""}
+
+Règles pour chaque champ :
+- "nom" : la DÉSIGNATION de la qualification, du certificat ou de l'équipement, telle qu'elle est imprimée sur le document. Exemples : "CACES R489 catégorie 3", "Certificat d'aptitude à l'hyperbarie classe II mention B", "Permis de navigation", "Habilitation électrique B1V". N'y mets JAMAIS le nom de la personne ni celui de l'organisme.
+- "titulaire" : le nom de la personne à qui le document est délivré, s'il figure sur le document.
+- "organisme" : l'organisme émetteur ou certificateur.
+- "type" : la nature du document.
+- "serie" : le numéro de série, de référence ou d'immatriculation s'il y en a un.
+
+Si la date est illimitée, permanente ou sans expiration, mets "illimite". Si une information est absente, mets null. Réponds UNIQUEMENT avec le JSON.` }
         ]}], 512);
     const text = data.content?.[0]?.text || '';
     const parsed = JSON.parse(text.replace(/```json|```/g,'').trim());
