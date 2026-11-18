@@ -1792,6 +1792,7 @@ function deletePersonnel(id) {
 // QUALIFICATIONS
 // ============================================================
 function openAddQualif(personnelId, qualifId) {
+  delete fichiersScannes['qualif'];
   const q = qualifId ? DB.qualifications.find(x=>x.id===qualifId) : null;
   document.getElementById('modal-title').textContent = q ? 'Modifier la qualification' : 'Ajouter une qualification';
   document.getElementById('modal-body').innerHTML = `
@@ -1803,6 +1804,7 @@ function openAddQualif(personnelId, qualifId) {
       <span class="ai-badge">✨ Analyse IA incluse</span>
     </div>
     <input type="file" id="file-scan-qualif" accept="image/*,.pdf,.doc,.docx" style="display:none" onchange="handleFileScan(event,'qualif')">
+    <div id="scan-result-qualif" style="display:none;margin-top:8px;font-size:12px"></div>
   </div>
   <div class="form-grid">
     <div class="field field-full"><label>Agent *</label><select id="q-personnel">
@@ -1832,20 +1834,67 @@ function openAddQualif(personnelId, qualifId) {
   openModal('modal-main');
 }
 
-function saveQualif(id) {
+async function saveQualif(id) {
   const nom = document.getElementById('q-nom').value.trim();
   const date = getDateOrIllimite('q');
   const personnelId = document.getElementById('q-personnel').value;
   if (!nom || !date || !personnelId) { alert('Champs requis incomplets'); return; }
   const data = { nom, type:document.getElementById('q-type').value, dateValidite:date, personnelId, organisme:document.getElementById('q-org').value.trim(), notes:document.getElementById('q-notes').value.trim() };
+
+  let savedId = id;
   if (id) {
     const idx = DB.qualifications.findIndex(x=>x.id===id);
     if (idx>=0) DB.qualifications[idx] = {...DB.qualifications[idx],...data};
-  } else { DB.qualifications.push({id:uid(),...data}); }
+  } else {
+    savedId = uid();
+    DB.qualifications.push({id:savedId,...data});
+  }
+
+  // Le document confié à l'IA est enregistré et joint à cette qualification
+  if (fichiersScannes['qualif']) {
+    const btn = document.querySelector('#modal-footer .btn-primary');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Enregistrement du document...'; }
+    const p = DB.personnel.find(x=>x.id===personnelId);
+    const docId = await joindreFichierScanne('qualif', { refId: personnelId, refNom: p?.nom });
+    if (docId) {
+      const q = DB.qualifications.find(x=>x.id===savedId);
+      if (q) q.docId = docId;
+    }
+  }
+
   save('qualifications');
-  const savedQual = id ? DB.qualifications.find(x=>x.id===id) : DB.qualifications[DB.qualifications.length-1];
-  syncUpsert('qualifications', savedQual);
+  syncUpsert('qualifications', DB.qualifications.find(x=>x.id===savedId));
   closeModal('modal-main'); showPage(currentPage);
+}
+
+// Enregistre le fichier confié à l'IA depuis un formulaire et le rattache à
+// l'enregistrement créé. Rien n'est fait si aucun scan n'a eu lieu.
+async function joindreFichierScanne(target, { refId, refNom }) {
+  const file = fichiersScannes[target];
+  if (!file) return null;
+  delete fichiersScannes[target];
+
+  const ext = (file.name.split('.').pop()||'').toLowerCase();
+  const type = ['jpg','jpeg','png','webp','heic','heif'].includes(ext) ? 'image'
+             : ext === 'pdf' ? 'pdf'
+             : ['xls','xlsx'].includes(ext) ? 'excel' : 'word';
+  const docId = uid();
+  const doc = {
+    id: docId, nom: file.name, type,
+    refId: refId || null, refNom: refNom || null,
+    date: new Date().toLocaleDateString('fr-FR'), size: file.size,
+  };
+
+  try {
+    doc.url = await uploadToR2(file, file.name);
+  } catch (e) {
+    // Repli : on conserve le document dans la base plutôt que de le perdre
+    doc.dataUrl = await new Promise(res => { const fr = new FileReader(); fr.onload = ev => res(ev.target.result); fr.readAsDataURL(file); });
+  }
+  DB.documents.push(doc);
+  save('documents');
+  syncUpsert('documents', doc);
+  return docId;
 }
 
 function deleteQualif(id, personnelId) {
@@ -2873,10 +2922,21 @@ function showToast(msg, type='info') {
 // ============================================================
 // FILE SCAN + AI
 // ============================================================
+// Fichier confié à l'IA depuis un formulaire : on le garde de côté pour le
+// joindre à l'enregistrement au moment de la sauvegarde.
+const fichiersScannes = {};
+
 function handleFileScan(event, target) {
   const file = event.target.files[0];
   if (!file) return;
   const ext = file.name.split('.').pop().toLowerCase();
+  fichiersScannes[target] = file;
+
+  const el = document.getElementById('scan-result-' + target);
+  if (el) {
+    el.style.display = 'block';
+    el.innerHTML = `<span style="color:var(--text3)">📎 ${file.name} — sera joint à l'enregistrement</span>`;
+  }
 
   if (['xls','xlsx'].includes(ext)) {
     const reader = new FileReader();
@@ -2945,7 +3005,7 @@ Si la date est illimitée, permanente ou sans expiration, mets "illimite". Si un
     }
     if (parsed.organisme && document.getElementById(target==='mat'?'mat-org':'q-org')) document.getElementById(target==='mat'?'mat-org':'q-org').value = parsed.organisme || '';
     if (parsed.serie && document.getElementById('mat-ref')) document.getElementById('mat-ref').value = parsed.serie || '';
-    if (resultEl) resultEl.innerHTML = '<span class="ai-badge">✅ Document analysé — vérifiez les champs</span>';
+    if (resultEl) resultEl.innerHTML = '<span class="ai-badge">✅ Document analysé — vérifiez les champs, il sera joint à l\'enregistrement</span>';
   } catch(e) {
     if (resultEl) resultEl.innerHTML = `<span style="color:var(--red2);font-size:12px">❌ ${e.message || 'Analyse impossible — saisissez manuellement'}</span>`;
   }
