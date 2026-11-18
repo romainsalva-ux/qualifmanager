@@ -725,9 +725,9 @@ function initDemoData() {
     {id:uid(),personnelId:pid[0],type:'Diplôme',nom:'BEES1 Plongée',dateValidite:addDays(today,365*3),organisme:'FFESSM',notes:'Diplôme permanent'},
     {id:uid(),personnelId:pid[1],type:'Aptitude médicale',nom:'Certificat médical plongée',dateValidite:addDays(today,-15),organisme:'Dr. Bernard',notes:'À renouveler'},
     {id:uid(),personnelId:pid[1],type:'Diplôme',nom:'PADI Advanced',dateValidite:addDays(today,365),organisme:'PADI',notes:''},
-    {id:uid(),personnelId:pid[2],type:'Permis / Habilitation',nom:'Permis C + EC',dateValidite:addDays(today,400),organisme:'Préfecture',notes:''},
+    {id:uid(),personnelId:pid[2],type:'Permis',nom:'Permis C + EC',dateValidite:addDays(today,400),organisme:'Préfecture',notes:''},
     {id:uid(),personnelId:pid[2],type:'Formation',nom:'FCO Marchandises',dateValidite:addDays(today,25),organisme:'AFTRAL',notes:''},
-    {id:uid(),personnelId:pid[3],type:'Permis / Habilitation',nom:'CACES Grue R483',dateValidite:addDays(today,8),organisme:'APAVE',notes:''},
+    {id:uid(),personnelId:pid[3],type:'Habilitation',nom:'CACES Grue R483',dateValidite:addDays(today,8),organisme:'APAVE',notes:''},
     {id:uid(),personnelId:pid[3],type:'Aptitude médicale',nom:'Visite médicale conducteur engins',dateValidite:addDays(today,180),organisme:'Médecine du travail',notes:''},
   ];
 
@@ -852,7 +852,7 @@ function catIcon(cat, souscat) {
     if (s.includes('grue')) return '🏗️';
     if (s.includes('sans sous-type')) return '📦';
   }
-  const icons = {Bouteille:'🫧',Plongée:'🤿',Véhicule:'🚛',Engin:'🏗️',EPI:'🦺',Bateau:'⛵',Autre:'📦','Aptitude médicale':'🏥',Diplôme:'🎓','Permis / Habilitation':'📋',Formation:'📚'};
+  const icons = {Bouteille:'🫧',Plongée:'🤿',Véhicule:'🚛',Engin:'🏗️',EPI:'🦺',Bateau:'⛵',Autre:'📦','Aptitude médicale':'🏥',Diplôme:'🎓',Permis:'🪪',Habilitation:'⚡',Formation:'📚','Permis / Habilitation':'📋'};
   return icons[cat] || '📦';
 }
 
@@ -1811,7 +1811,7 @@ function openAddQualif(personnelId, qualifId) {
       ${DB.personnel.map(p=>`<option value="${p.id}" ${(q?.personnelId||personnelId)===p.id?'selected':''}>${p.nom}</option>`).join('')}
     </select></div>
     <div class="field"><label>Type *</label><select id="q-type">
-      ${['Aptitude médicale','Diplôme','Permis / Habilitation','Formation','Autre'].map(t=>`<option value="${t}" ${q?.type===t?'selected':''}>${catIcon(t)} ${t}</option>`).join('')}
+      ${['Aptitude médicale','Diplôme','Permis','Habilitation','Formation','Autre'].map(t=>`<option value="${t}" ${q?.type===t?'selected':''}>${catIcon(t)} ${t}</option>`).join('')}
     </select></div>
     <div class="field"><label>Désignation *</label><input id="q-nom" value="${q?.nom||''}" placeholder="Ex : CACES R489 catégorie 3"></div>
     <div class="field"><label>Date de fin de validité *</label>
@@ -2211,7 +2211,7 @@ Retourne un JSON avec deux tableaux (sans markdown) :
       "matchPersonnelId": "ID du personnel concerné sinon null",
       "personnelNom": "nom de la personne titulaire",
       "nom": "DÉSIGNATION de la qualification telle qu'imprimée sur le document (ex: CACES R489 catégorie 3, Certificat d'aptitude à l'hyperbarie classe II mention B) — jamais le nom de la personne ni de l'organisme",
-      "type": "Permis / Habilitation|Diplôme|Aptitude médicale|Formation",
+      "type": "Permis|Habilitation|Diplôme|Aptitude médicale|Formation|Autre",
       "dateValidite": "YYYY-MM-DD ou illimite",
       "organisme": "organisme émetteur",
       "notes": ""
@@ -2351,7 +2351,7 @@ function applyMultiDocImport(parsed, docId) {
   qualifs.forEach(item => {
     const personnelId = item.matchPersonnelId || null;
     if (!personnelId) { qualSkipped++; return; }
-    const data = { nom:item.nom||'Sans nom', type:item.type||'Permis / Habilitation', dateValidite:item.dateValidite||'', personnelId, organisme:item.organisme||'', notes:item.notes||'' };
+    const data = { nom:item.nom||'Sans nom', type:item.type||'Autre', dateValidite:item.dateValidite||'', personnelId, organisme:item.organisme||'', notes:item.notes||'' };
     const newQ = {id:uid(),...data};
     DB.qualifications.push(newQ); syncUpsert('qualifications',newQ); qualCreated++;
   });
@@ -2684,7 +2684,7 @@ ${contexte}
 Analyse ce document et retourne UNIQUEMENT ce JSON (sans markdown) :
 {
   "materiel": [{"action":"update"|"create","matchId":"ID si update sinon null","nom":"...","ref":"...","rubrique":"plongee|navire|vehicule|grue","souscat":"...","certification":"intitulé du contrôle","typeCertif":"Requalification|Vérification périodique|Contrôle technique|Assurance|Permis / Titre|Autre","dateValidite":"YYYY-MM-DD ou illimite","organisme":"...","notes":""}],
-  "qualifications": [{"action":"update"|"create","matchPersonnelId":"ID ou null","matchQualifId":"ID qualif existante si doublon sinon null","personnelNom":"nom de la personne titulaire","nom":"DÉSIGNATION de la qualification telle qu'imprimée sur le document, jamais le nom de la personne","type":"Permis / Habilitation|Diplôme|Aptitude médicale|Formation","dateValidite":"YYYY-MM-DD ou illimite","organisme":"...","notes":""}]
+  "qualifications": [{"action":"update"|"create","matchPersonnelId":"ID ou null","matchQualifId":"ID qualif existante si doublon sinon null","personnelNom":"nom de la personne titulaire","nom":"DÉSIGNATION de la qualification telle qu'imprimée sur le document, jamais le nom de la personne","type":"Permis|Habilitation|Diplôme|Aptitude médicale|Formation|Autre","dateValidite":"YYYY-MM-DD ou illimite","organisme":"...","notes":""}]
 }`;
 
   try {
@@ -2811,7 +2811,7 @@ function applyScanEntityImport(parsed, docId, entityType, entityId, qualifId) {
   qualifs.forEach(item => {
     const personnelId = item.matchPersonnelId || null;
     if (!personnelId) { skipped++; return; }
-    const data = {nom:item.nom||'Sans nom',type:item.type||'Permis / Habilitation',dateValidite:item.dateValidite||'',personnelId,organisme:item.organisme||'',notes:item.notes||''};
+    const data = {nom:item.nom||'Sans nom',type:item.type||'Autre',dateValidite:item.dateValidite||'',personnelId,organisme:item.organisme||'',notes:item.notes||''};
 
     // Doublon : même qualification pour la même personne → mise à jour + remplacement du document
     const existQualifId = item.matchQualifId || qualifId || null;
