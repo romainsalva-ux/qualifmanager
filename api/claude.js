@@ -49,14 +49,17 @@ function lireJson(req) {
 module.exports = async (req, res) => {
   if (req.method === 'OPTIONS') return res.status(204).end();
 
-  // Diagnostic : indique si la clé est vue par le serveur, sans la dévoiler.
+  // Diagnostic : de quoi repérer une clé tronquée ou mal collée, sans la dévoiler.
   if (req.method === 'GET') {
-    const k = process.env.ANTHROPIC_API_KEY || '';
+    const brut = process.env.ANTHROPIC_API_KEY || '';
+    const k = brut.trim();
     return res.status(200).json({
       fonction: 'claude',
       cleConfiguree: !!k,
       longueurCle: k.length || null,
-      debutAttendu: k ? k.startsWith('sk-ant-') : null,
+      espacesParasites: brut !== k,
+      debutAttendu: k ? k.startsWith('sk-ant-api') : null,
+      quatreDerniers: k ? k.slice(-4) : null,
       modele: MODELE,
       runtime: process.version,
     });
@@ -64,7 +67,9 @@ module.exports = async (req, res) => {
 
   if (req.method !== 'POST') return res.status(405).json({ error: 'Méthode non autorisée' });
 
-  if (!process.env.ANTHROPIC_API_KEY) {
+  // Un retour à la ligne collé par mégarde suffirait à faire rejeter la clé.
+  const cle = (process.env.ANTHROPIC_API_KEY || '').trim();
+  if (!cle) {
     return res.status(500).json({ error: "Analyse IA non configurée sur le serveur" });
   }
 
@@ -92,7 +97,7 @@ module.exports = async (req, res) => {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-key': process.env.ANTHROPIC_API_KEY,
+        'x-api-key': cle,
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify(charge),
