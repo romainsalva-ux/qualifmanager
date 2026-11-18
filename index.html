@@ -2882,9 +2882,13 @@ function confirmDelete(msg, onConfirm) {
   if (overlay) overlay.remove();
   overlay = document.createElement('div');
   overlay.id = 'qm-confirm-overlay';
-  // Insérer dans la modal ouverte si possible (évite le piège du stacking context iOS)
-  const openModal = document.querySelector('.modal-overlay.open') || document.body;
-  overlay.style.cssText = 'position:absolute;inset:0;z-index:500;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);border-radius:inherit';
+  // Insérer dans la modal au premier plan (évite le piège du stacking context iOS)
+  const hote = modaleAuPremierPlan();
+  // Dans une modale (position:fixed), 'absolute' se cale dessus. Sur le corps
+  // de page, il faut 'fixed' pour rester dans l'écran plutôt que de suivre le
+  // défilement du document.
+  const ancrage = hote === document.body ? 'fixed' : 'absolute';
+  overlay.style.cssText = `position:${ancrage};inset:0;z-index:1500;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);border-radius:inherit`;
   overlay.innerHTML = `
     <div style="background:var(--bg1,#1e293b);border:1px solid var(--border,#334155);border-radius:16px;padding:24px;max-width:300px;width:85%;box-shadow:0 8px 32px rgba(0,0,0,.6);text-align:center">
       <div style="font-size:28px;margin-bottom:10px">🗑️</div>
@@ -2895,8 +2899,7 @@ function confirmDelete(msg, onConfirm) {
         <button id="qm-confirm-btn" style="flex:1;padding:10px;border-radius:10px;border:none;background:#dc2626;color:#fff;font-size:14px;font-weight:600;cursor:pointer">Supprimer</button>
       </div>
     </div>`;
-  openModal.style.position = 'relative';
-  openModal.appendChild(overlay);
+  hote.appendChild(overlay);
   document.getElementById('qm-confirm-btn').onclick = () => { overlay.remove(); onConfirm(); };
   document.getElementById('qm-confirm-cancel').onclick = () => overlay.remove();
   overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
@@ -3173,8 +3176,37 @@ function globalSearch(q) {
 // ============================================================
 // MODAL HELPERS
 // ============================================================
-function openModal(id) { document.getElementById(id).classList.add('open'); }
-function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+// Les modales sont empilables : une boîte ouverte depuis une fiche doit passer
+// au-dessus d'elle, quel que soit son ordre dans la page. Sans cela, le menu
+// document s'ouvrait derrière la fiche du plongeur.
+let plancherModal = 1000;
+
+function openModal(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.style.zIndex = ++plancherModal;
+  el.classList.add('open');
+  // Toujours présenter la boîte depuis son début
+  const contenu = el.querySelector('.modal');
+  if (contenu) contenu.scrollTop = 0;
+}
+
+function closeModal(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.classList.remove('open');
+  el.style.zIndex = '';
+  if (!document.querySelector('.modal-overlay.open')) plancherModal = 1000;
+}
+
+// La boîte de confirmation doit se greffer sur la modale la plus en avant,
+// pas sur la première rencontrée dans la page.
+function modaleAuPremierPlan() {
+  const ouvertes = [...document.querySelectorAll('.modal-overlay.open')];
+  if (!ouvertes.length) return document.body;
+  return ouvertes.reduce((a, b) =>
+    (parseInt(b.style.zIndex || 1000, 10) >= parseInt(a.style.zIndex || 1000, 10)) ? b : a);
+}
 document.getElementById('modal-main').addEventListener('click', e => { if(e.target===document.getElementById('modal-main')) closeModal('modal-main'); });
 document.getElementById('modal-detail').addEventListener('click', e => { if(e.target===document.getElementById('modal-detail')) closeModal('modal-detail'); });
 
