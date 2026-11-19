@@ -470,6 +470,34 @@ async function appelIA(messages, maxTokens = 4000) {
   return data;
 }
 
+// L'IA préfixe parfois son JSON d'une phrase d'explication. On isole le bloc
+// JSON du texte qui l'entoure plutôt que d'échouer sur la première phrase.
+function extraireJSON(texte) {
+  let t = String(texte || '').replace(/```json|```/g, '').trim();
+
+  const debutObjet = t.indexOf('{'), finObjet = t.lastIndexOf('}');
+  const debutListe = t.indexOf('['), finListe = t.lastIndexOf(']');
+
+  // On retient la structure qui commence le plus tôt dans la réponse
+  let debut = -1, fin = -1;
+  if (debutObjet !== -1 && finObjet > debutObjet) { debut = debutObjet; fin = finObjet; }
+  if (debutListe !== -1 && finListe > debutListe && (debut === -1 || debutListe < debut)) { debut = debutListe; fin = finListe; }
+
+  if (debut === -1) {
+    // Pas de JSON du tout : l'IA a répondu en toutes lettres, souvent parce
+    // qu'elle n'a rien su lire. On remonte son explication, elle est utile.
+    const phrase = t.split('\n').find(l => l.trim()) || '';
+    throw new Error(phrase ? phrase.slice(0, 160) : "L'IA n'a rien pu extraire de ce document.");
+  }
+
+  t = t.substring(debut, fin + 1);
+  try {
+    return JSON.parse(t);
+  } catch (e) {
+    throw new Error("Réponse de l'IA illisible. Réessayez, ou avec une image plus nette.");
+  }
+}
+
 function setSyncStatus(state) {
   // state: 'offline' | 'syncing' | 'online'
   const dot = document.getElementById('sync-dot');
@@ -2415,12 +2443,7 @@ Règles :
 
   try {
     const data = await appelIA([{ role: 'user', content: prompt }], 8000);
-    const text = data.content?.[0]?.text || '';
-    let jsonStr = text.replace(/```json|```/g,'').trim();
-    const firstBracket = jsonStr.indexOf('[');
-    const lastBracket = jsonStr.lastIndexOf(']');
-    if (firstBracket !== -1 && lastBracket !== -1) jsonStr = jsonStr.substring(firstBracket, lastBracket+1);
-    const items = JSON.parse(jsonStr);
+    const items = extraireJSON(data.content?.[0]?.text);
 
     // Résoudre les matchId : les IDs dans le prompt sont les vrais IDs de DB.materiel
     // L'IA reçoit la liste avec les vrais IDs (on va les injecter)
@@ -2701,11 +2724,7 @@ Analyse ce document et retourne UNIQUEMENT ce JSON (sans markdown) :
       : { type:'image', source:{type:'base64',media_type:mediaType,data:base64} };
 
     const data = await appelIA([{role:'user',content:[contentBlock,{type:'text',text:systemPrompt}]}], 4000);
-    let text = data.content?.[0]?.text||'';
-    text = text.replace(/```json|```/g,'').trim();
-    const fb=text.indexOf('{'), lb=text.lastIndexOf('}');
-    if(fb!==-1&&lb!==-1) text=text.substring(fb,lb+1);
-    const parsed = JSON.parse(text);
+    const parsed = extraireJSON(data.content?.[0]?.text);
     renderScanEntityPreview(parsed, doc, entityType, entityId, qualifId, resultEl);
   } catch(e) {
     // Doc déjà sauvegardé avant l'appel IA — juste afficher l'erreur
@@ -2988,10 +3007,10 @@ Règles pour chaque champ :
 - "type" : la nature du document.
 - "serie" : le numéro de série, de référence ou d'immatriculation s'il y en a un.
 
-Si la date est illimitée, permanente ou sans expiration, mets "illimite". Si une information est absente, mets null. Réponds UNIQUEMENT avec le JSON.` }
-        ]}], 512);
-    const text = data.content?.[0]?.text || '';
-    const parsed = JSON.parse(text.replace(/```json|```/g,'').trim());
+Si la date est illimitée, permanente ou sans expiration, mets "illimite". Si une information est absente, mets null.
+Réponds UNIQUEMENT avec le JSON : aucune phrase avant, aucun commentaire après. Si le document est illisible, renvoie quand même le JSON avec tous les champs à null.` }
+        ]}], 1024);
+    const parsed = extraireJSON(data.content?.[0]?.text);
     if (parsed.nom && document.getElementById(target==='mat'?'mat-nom':'q-nom')) document.getElementById(target==='mat'?'mat-nom':'q-nom').value = parsed.nom;
     if (parsed.date_validite) {
       if (parsed.date_validite === 'illimite') {
